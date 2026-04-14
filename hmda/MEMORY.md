@@ -1,164 +1,322 @@
-# HMDA Pipeline — Memory & Reference
+# HMDA Pipeline -- Memory & Reference
 
 ## What Was Built
 
-A full ETL pipeline for the HMDA (Home Mortgage Disclosure Act) public LAR dataset, 2018–2024. Raw pipe-delimited ZIP files are downloaded from FFIEC, joined with the Avery/Philadelphia Fed lender crosswalk, and written to Parquet. All years are queryable via a DuckDB `lar_panel` VIEW.
+A full ETL pipeline for the HMDA (Home Mortgage Disclosure Act) public LAR dataset
+covering **2000-2024** (25 years, ~536 million rows). Raw files are downloaded from
+FFIEC and the CFPB historic data portal, or manually obtained from OpenICPSR, then
+harmonized across four data source eras and written to hive-partitioned Parquet.
+All years are queryable via a DuckDB `lar_panel` VIEW that includes six computed
+harmonization columns bridging categorical code differences across the 2017/2018
+reform boundary.
 
 ---
 
-## Data Sources
+## Data Sources (Four-Era Architecture)
 
-| Source | URL | Purpose |
-|--------|-----|---------|
-| FFIEC Snapshot LAR | `https://files.ffiec.cfpb.gov/static-data/snapshot/{year}/{year}_public_lar_pipe.zip` | Raw LAR data, 2018–2024 |
-| Philadelphia Fed Avery | `https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/hmda/hmda-2018-present.xlsx` | LEI → RSSD crosswalk (post-2018) |
-| Philadelphia Fed Avery | `https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/hmda/hmda-1990-2017.xlsx` | Respondent ID → RSSD crosswalk (pre-2018) |
-| FFIEC ARID→LEI | `https://files.ffiec.cfpb.gov/static-data/snapshot/2017/arid2017tolei/arid2017_to_lei_xref_psv.zip` | Maps pre-2018 ARID to post-2018 LEI |
-| CFPB Data Browser API | `https://ffiec.cfpb.gov/v2/data-browser-api/view/nationwide/aggregations` | Official application counts for validation |
+| Era | Years | Source | Format | Header | Cols |
+|-----|-------|--------|--------|--------|------|
+| Post-reform | 2018-2024 | FFIEC snapshot `_pipe.zip` | Pipe `\|` | Yes | 99 |
+| Pre-reform FFIEC | 2017 | FFIEC snapshot `_txt.zip` | Pipe `\|` | **No** (hardcoded `COLUMNS_2017`) | 45 |
+| Pre-reform CFPB | 2007-2016 | CFPB historic portal `_labels.zip` | Comma `,` | Yes | 78 (45 kept) |
+| ICPSR pre-CFPB | 2000-2006 | OpenICPSR project 151921 (manual) | Pipe `\|` | Yes | 38 or 23 |
+
+The CFPB historic files (2007-2016) have **78 columns** -- each categorical field has BOTH a
+code column (e.g., `loan_type=1`) AND a label column (e.g., `loan_type_name="Conventional"`).
+The ETL keeps codes and drops all label columns via `COLS_TO_DROP_CFPB_HISTORIC`.
+
+ICPSR files (2000-2006) have **two sub-eras** due to the 2004 HMDA reform:
+- **2004-2006**: 38 columns (post-reform -- added ethnicity, race_2-5, preapproval, property_type, rate_spread, hoepa_status, lien_status)
+- **2000-2003**: 23 columns (pre-reform -- only race_1, no ethnicity, no lien/hoepa/preapproval)
+
+All ICPSR values are pure numeric codes (no label columns). ICPSR ZIPs use **Deflate64**
+compression; extract with `unzip` from Git (`C:\Program Files\Git\usr\bin\unzip.exe`) --
+Python's `zipfile` module and PowerShell's `Expand-Archive` do NOT support Deflate64.
+
+### Download URL Templates
+
+```
+2018-2024: https://files.ffiec.cfpb.gov/static-data/snapshot/{year}/{year}_public_lar_pipe.zip
+2017:      https://files.ffiec.cfpb.gov/static-data/snapshot/2017/2017_public_lar_txt.zip
+2007-2016: https://files.consumerfinance.gov/hmda-historic-loan-data/hmda_{year}_nationwide_all-records_labels.zip
+2000-2006: Manual download from https://www.openicpsr.org/openicpsr/project/151921/version/V1/view
+```
 
 ---
 
-## File Layout
+## File Layout on Disk
 
 ```
 C:\empirical-data-construction\hmda\
-├── hmda.duckdb                     # Master DuckDB (avery_crosswalk, panel_metadata, lar_panel VIEW)
-├── raw\
-│   └── {year}\                     # Downloaded ZIP + extracted TXT (can delete after staging)
-├── staging\
-│   └── year={year}\data.parquet    # Hive-partitioned Parquet (snappy compressed)
-└── avery\                          # Avery XLSX files
+  hmda.duckdb                       -- Master DuckDB (all tables + lar_panel VIEW)
+  raw\{year}\                       -- Downloaded ZIP + extracted TXT (delete after staging)
+  staging\year={year}\data.parquet  -- Hive-partitioned Parquet (snappy)
+  avery\                            -- Philly Fed Avery XLSX files
+```
+
+ICPSR raw ZIPs (2000-2006) remain in `raw\` as they were manually downloaded.
+Extracted TXT files can be deleted after staging to reclaim disk space.
+
+---
+
+## DuckDB Tables
+
+| Table | Rows | Description |
+|-------|------|-------------|
+| `lar_panel` | ~536M | VIEW over 25 hive-partitioned Parquets |
+| `avery_crosswalk` | ~264K | Philly Fed lender file; one row per lender per year |
+| `panel_metadata` | 25 | One row per year: row_count, match_rate, build info |
+| `arid2017_to_lei` | ~5.4K | Pre-2018 respondent_id -> LEI crosswalk |
+
+### DuckDB Connection
+
+```python
+import duckdb
+conn = duckdb.connect("C:/empirical-data-construction/hmda/hmda.duckdb", read_only=True)
+conn.execute("PRAGMA threads=8")
+conn.execute("PRAGMA memory_limit='16GB'")
+```
+
+Or via config.py:
+```python
+from config import get_duckdb_path, DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
+conn = duckdb.connect(str(get_duckdb_path()), read_only=True)
 ```
 
 ---
 
-## Execution Order
+## Column Schema
 
-```bash
-python -m hmda.avery                        # Load Avery RSSD crosswalk into DuckDB
-python -m hmda.arid_xref                    # Load ARID2017->LEI crosswalk into DuckDB
-python -m hmda.download --year 2024         # Download one year
-python -m hmda.construct --year 2024        # Stage to Parquet + rebuild VIEW
-# ... repeat download + construct for each year
-# After each year: delete the raw TXT to free disk space before downloading the next year
-```
+All columns are stored as **VARCHAR**. Cast to numeric at query time using
+`TRY_CAST(col AS DOUBLE)` or `TRY_CAST(col AS INTEGER)`.
 
-Or for all years at once (after individual validation):
-```bash
-python -m hmda.download --all
-python -m hmda.construct --all
-```
+### Base columns from MASTER_SCHEMA (99 VARCHAR columns)
 
----
+Core identifiers: `activity_year`, `lei`, `derived_msa_md`, `state_code`, `county_code`, `census_tract`
 
-## CRITICAL BUG FIXED: Avery JOIN must include activity_year
+Loan characteristics: `loan_type`, `loan_purpose`, `lien_status`, `loan_amount`, `interest_rate`,
+`rate_spread`, `hoepa_status`, `total_loan_costs`, `loan_term`, `conforming_loan_limit`,
+`combined_loan_to_value_ratio`, `property_value`, `debt_to_income_ratio`,
+`open_end_line_of_credit`, `reverse_mortgage`, `business_or_commercial_purpose`,
+`negative_amortization`, `interest_only_payment`, `balloon_payment`
 
-**Bug**: The original `construct.py` joined `avery_crosswalk` on `lei` only:
-```sql
-LEFT JOIN main_db.avery_crosswalk AS av ON lar."lei" = av.lei
-```
-The Avery crosswalk has **one row per lender per year** (e.g., a lender active 2018–2024 has 7 rows). Joining on LEI alone fans each LAR record out to all matching Avery years, inflating row counts by ~6-7×.
+Applicant demographics: `applicant_ethnicity_1` thru `_5`, `co_applicant_ethnicity_1` thru `_5`,
+`applicant_race_1` thru `_5`, `co_applicant_race_1` thru `_5`,
+`applicant_sex`, `co_applicant_sex`, `applicant_age`, `co_applicant_age`,
+`applicant_credit_score_type`, `co_applicant_credit_score_type`
 
-**Fix** (already applied in `construct.py`):
-```sql
-LEFT JOIN main_db.avery_crosswalk AS av ON lar."lei" = av.lei AND av.activity_year = {year}
-```
+Application outcome: `action_taken`, `purchaser_type`, `preapproval`,
+`denial_reason_1` thru `_4`, `submission_of_application`, `initially_payable_to_institution`
 
-**How to verify**: After building, the Parquet row count should match the raw file line count minus 1 (the header). Cross-check against the CFPB Data Browser API — the ratio of snapshot rows to API application counts should be ~1×, not ~7×.
+Property: `construction_method`, `occupancy_type`, `total_units`, `manufactured_home_secured_property_type`
 
-CFPB API validation query:
-```
-GET https://ffiec.cfpb.gov/v2/data-browser-api/view/nationwide/aggregations
-    ?years={year}&actions_taken=1,2,3,4,5,6,7,8&aggregation_fields=action_taken
-```
+AUS / underwriting: `aus_1` thru `_5`
 
-Expected raw file row counts (from CFPB API — these are true application counts, which equal raw snapshot rows minus 1 header):
+Tract-level: `tract_population`, `tract_minority_population_percent`, `ffiec_msa_md_median_family_income`,
+`tract_to_msa_income_percentage`, `tract_owner_occupied_units`, `tract_one_to_four_family_homes`,
+`tract_median_age_of_housing_units`
 
-| Year | CFPB API (true apps) | Expected raw rows |
-|------|----------------------|-------------------|
-| 2018 | 15,138,510 | ~15,138,510 |
-| 2019 | 17,573,963 | ~17,573,963 |
-| 2020 | 25,699,043 | ~25,699,043 |
-| 2021 | 26,269,980 | ~26,269,980 |
-| 2022 | 16,099,307 | ~16,099,307 |
-| 2023 | 11,564,178 | ~11,564,178 |
-| 2024 | 12,229,298 | ~12,229,298 |
+Derived CFPB fields: `derived_loan_product_type`, `derived_dwelling_category`, `derived_ethnicity`,
+`derived_race`, `derived_sex`
 
-Note: The CFPB "snapshot" public LAR applies ~7× privacy replication for small lenders at the **record level within the file** — so the raw file itself already contains replicated rows. The API counts above reflect the true underlying applications. The raw snapshot file row counts should approximately match these API numbers (the replication is baked into the file we download). See "Privacy Replication" section below for details.
+### Pre-2018 extra columns (NULL for 2018+)
+
+`respondent_id` -- 10-char pre-2018 lender identifier
+`agency_code` -- 1=OCC, 2=FRS, 3=FDIC, 5=NCUA, 7=HUD
+`property_type` -- 1=SFR, 2=Manufactured, 3=Multifamily (present 2004+; NULL for 2000-2003)
+
+### Avery supplement columns (joined at ETL time)
+
+`rssd_id`, `parent_rssd`, `top_holder_rssd`
+
+### Harmonized VIEW columns (computed at query time for ALL years)
+
+See Harmonization section below.
+
+### `year` column
+
+INTEGER partition column added by the pipeline.
 
 ---
 
-## Disk Space Management
+## Unit Conventions -- Critical
 
-**The C: drive filled up during the first build attempt.** Raw files are large:
-- Each year's extracted TXT: 2–11 GB
-- Delete the TXT (and ZIP) immediately after `construct` succeeds for that year
-- Do not download/extract multiple years simultaneously
-
-**Recommended workflow** (process one year at a time):
-```bash
-python -m hmda.download --year 2024
-python -m hmda.construct --year 2024
-rm -rf C:\empirical-data-construction\hmda\raw\2024\   # free space before next year
-python -m hmda.download --year 2023
-# ...
-```
-
-The `download.py` script already deletes the ZIP after extraction if `--delete-raw` flag is used. Consider using that flag.
-
----
-
-## Critical: Privacy Replication in the Snapshot Public LAR
-
-The CFPB **snapshot** public LAR is **not** a 1-record-per-application file. For privacy protection, small lenders have each application group replicated **~7 times** before publication. A lender with 1 application appears 7 times with identical fields.
-
-**Evidence**: A lender with LEI `549300D0TGZMG03GNM36` has exactly 7 rows in the 2024 snapshot, all identical (same action_taken, loan_type, loan_amount, census_tract, race, sex).
-
-**Implications for research**:
-- `COUNT(*)` overcounts applications for small lenders
-- There is **no unique loan identifier** in the public snapshot (removed deliberately)
-- For application counts, use the CFPB Data Browser API
-- Large lenders are **not** replicated (enough volume for anonymity)
-- The 2018 snapshot used a smaller replication factor than later years
-
----
-
-## Avery Crosswalk Structure
-
-The `avery_crosswalk` table has **one row per lender per year** (not one row per lender). Columns:
-
-| Column | Type | Notes |
+| Column | Unit | Notes |
 |--------|------|-------|
-| activity_year | INTEGER | Year of the Avery record |
-| lei | VARCHAR | LEI (post-2018 lenders only; NULL for pre-2018) |
-| respondent_id | VARCHAR | Pre-2018 HMDA respondent ID (also present for some post-2018) |
-| agency_code | INTEGER | Federal agency code (OCC=1, Fed=2, FDIC=3, OTS=4, NCUA=5, HUD=7) |
-| rssd_id | INTEGER | Fed Reserve institution ID |
-| parent_rssd | INTEGER | RSSD of parent |
-| top_holder_rssd | INTEGER | RSSD of top holder |
-| respondent_name | VARCHAR | |
-| assets | BIGINT | |
+| `loan_amount` | **Whole dollars** | Pre-2018 source stored $000s; ETL scales x1000 |
+| `income` | **$000s** | ALL years -- never changed. Multiply x1000 to get dollars |
+| `census_tract` | 11-char FIPS | Pre-2018 constructed from state+county+tract components |
+| `interest_rate` | Percent (e.g., "4.5") | 2018+ only; NULL for 2000-2017 |
+| `rate_spread` | Percent above APOR | Available 2004+; NULL for 2000-2003 |
 
-Post-2018 section: 34,721 rows, 6,490 unique LEIs (lenders span multiple years).
-Pre-2018 section: ~230,000 rows (no LEI column).
+---
 
-**Total loaded**: 264,721 rows.
+## Harmonized VIEW Columns (Bridge 2017/2018 Boundary)
 
-## Analysis-Time Join Pattern
+Six computed columns in `lar_panel` VIEW work correctly for ALL years 2000-2024:
 
-The join key depends on the era:
+```sql
+loan_purpose_harmonized
+  -- Maps 2018+ codes 31/32 -> '3' (all refinancings = '3')
+  -- Use this for cross-year refinance queries
+  -- Raw loan_purpose still available; '31'=cash-out refi, '32'=rate-term refi (2018+ only)
 
-| Era | LAR has | Join on |
-|-----|---------|---------|
-| 2018–2024 | `lei` | `lei + year` |
-| Pre-2018 (future) | `respondent_id`, `agency_code` | `respondent_id + agency_code + year` |
+purchaser_type_harmonized
+  -- Maps 2018+ codes 71/72 -> '7'
 
-**Universal join (handles both eras in one query):**
+denial_reason_1_harmonized
+denial_reason_2_harmonized
+denial_reason_3_harmonized
+  -- Maps 2017 code '0' (N/A) -> '10' (2018+ N/A code)
+  -- Also applies correctly to 2000-2016 (same '0' N/A code)
+
+preapproval_harmonized
+  -- Maps 2017 code '3' (Not Applicable) -> '2' (not requested)
+  -- Also applies correctly to 2007-2016; 2000-2003 preapproval is NULL
+```
+
+---
+
+## Key Categorical Code Reference
+
+### action_taken
+| Code | Meaning |
+|------|---------|
+| 1 | Loan originated |
+| 2 | Approved, not accepted |
+| 3 | Denied |
+| 4 | Withdrawn by applicant |
+| 5 | File closed for incompleteness |
+| 6 | Purchased by institution |
+| 7 | Preapproval denied |
+| 8 | Preapproval approved, not accepted |
+
+### loan_purpose (use loan_purpose_harmonized for cross-year queries)
+| Code | 2000-2017 | 2018+ |
+|------|-----------|-------|
+| 1 | Home purchase | Home purchase (same) |
+| 2 | Home improvement | Home improvement (same) |
+| 3 | Refinancing | Does not exist (split into 31/32) |
+| 31 | -- | Cash-out refinancing |
+| 32 | -- | Non-cash-out refinancing |
+| 4 | -- | Other purpose |
+| 5 | -- | Not applicable |
+
+### loan_type
+| Code | Meaning |
+|------|---------|
+| 1 | Conventional |
+| 2 | FHA-insured |
+| 3 | VA-guaranteed |
+| 4 | FSA/RHS-guaranteed |
+
+### lien_status (2004+ only; NULL for 2000-2003)
+| Code | Meaning |
+|------|---------|
+| 1 | First lien |
+| 2 | Subordinate lien |
+| 3 | Not secured (2004-2017 only) |
+| 4 | Not applicable/purchased (2004-2017 only) |
+
+### conforming_loan_limit (2018+ only)
+| Code | Meaning |
+|------|---------|
+| C | Conforming |
+| NC | Non-conforming (jumbo) |
+| NCB | Non-conforming, below limit |
+| U | Undetermined |
+| NA | Not applicable |
+
+### occupancy_type
+| Code | Meaning |
+|------|---------|
+| 1 | Principal residence |
+| 2 | Second residence |
+| 3 | Investment property |
+
+### purchaser_type (use purchaser_type_harmonized for cross-year queries)
+| Code | Meaning |
+|------|---------|
+| 0 | Not sold |
+| 1 | Fannie Mae |
+| 2 | Ginnie Mae |
+| 3 | Freddie Mac |
+| 4 | Farmer Mac |
+| 5 | Private securitization |
+| 6 | Commercial bank/savings institution |
+| 7 | Non-bank financial institution (2000-2017) |
+| 71 | Credit union/mortgage company (2018+) |
+| 72 | Life insurance company (2018+) |
+
+### applicant_race_1
+| Code | Meaning |
+|------|---------|
+| 1 | American Indian or Alaska Native |
+| 2 | Asian |
+| 21-27 | Asian sub-categories (2018+) |
+| 3 | Black or African American |
+| 4 | Native Hawaiian or Other Pacific Islander |
+| 41-44 | Pacific Islander sub-categories (2018+) |
+| 5 | White |
+| 6 | Information not provided by applicant |
+| 7 | Not applicable |
+
+### applicant_ethnicity_1 (2004+ only; NULL for 2000-2003)
+| Code | Meaning |
+|------|---------|
+| 1 | Hispanic or Latino |
+| 11-14 | Hispanic sub-categories (2018+): Mexican, Puerto Rican, Cuban, Other |
+| 2 | Not Hispanic or Latino |
+| 22 | Not Hispanic (alternate code) |
+| 3 | Information not provided |
+| 4 | Not applicable |
+
+### construction_method (2018+ only)
+| Code | Meaning |
+|------|---------|
+| 1 | Site-built |
+| 2 | Manufactured home |
+
+### open_end_line_of_credit (2018+ only)
+| Code | Meaning |
+|------|---------|
+| 1 | Open-end line of credit |
+| 2 | Not an open-end line of credit (closed-end) |
+
+### reverse_mortgage (2018+ only)
+| Code | Meaning |
+|------|---------|
+| 1 | Reverse mortgage |
+| 2 | Not a reverse mortgage |
+
+---
+
+## RSSD Lender Linkage
+
+### Pre-2018 (2000-2017) -- join via respondent_id + agency_code
+
+```sql
+LEFT JOIN avery_crosswalk AS av
+    ON l.respondent_id = av.respondent_id
+    AND TRY_CAST(l.agency_code AS INTEGER) = av.agency_code
+    AND av.activity_year = l.year
+```
+
+100% match rate validated for all 2007-2017 years. Avery crosswalk covers 1990-present.
+
+### Post-2018 -- join via LEI
+
+```sql
+LEFT JOIN avery_crosswalk AS av ON l.lei = av.lei AND av.activity_year = l.year
+```
+
+### Universal join (handles both eras in one query)
+
 ```sql
 LEFT JOIN avery_crosswalk AS av
     ON av.activity_year = l.year
     AND CASE
-        WHEN l.lei IS NOT NULL AND l.lei != ''
+        WHEN l.lei IS NOT NULL AND l.lei NOT IN ('', 'NA', 'Exempt')
             THEN l.lei = av.lei
         ELSE
             l.respondent_id = av.respondent_id
@@ -166,57 +324,134 @@ LEFT JOIN avery_crosswalk AS av
     END
 ```
 
-**Post-2018 only (simpler):**
-```sql
-LEFT JOIN avery_crosswalk AS av ON l.lei = av.lei AND av.activity_year = l.year
-```
-
-**Cross-era institution linkage** (same bank, pre- and post-2018):
-```sql
--- arid2017_to_lei maps pre-2018 respondent_id → post-2018 LEI
-JOIN arid2017_to_lei AS x ON l.respondent_id = x.arid
-```
+`avery_crosswalk` columns: `activity_year`, `lei`, `respondent_id`, `agency_code`,
+`rssd_id`, `parent_rssd`, `top_holder_rssd`, `respondent_name`, `assets`
 
 ---
 
-## Known Data Quirks
+## Validated Row Counts (All 25 Years)
 
-| Year | Issue | Notes |
-|------|-------|-------|
-| 2018 | `loan_to_value_ratio` in CSV, `combined_loan_to_value_ratio` in schema | Pipeline NULL-fills `combined_loan_to_value_ratio` and drops `loan_to_value_ratio` |
-| 2020 | Min loan_amount = -$1.86B | Negative loan amounts in raw file; known CFPB data quality issue |
-| 2019 | Min loan_amount = -$1.4B | Same issue |
+| Year | Rows | Source |
+|------|------|--------|
+| 2024 | 12,229,298 | FFIEC snapshot |
+| 2023 | 11,483,889 | FFIEC snapshot |
+| 2022 | 16,080,210 | FFIEC snapshot |
+| 2021 | 26,124,552 | FFIEC snapshot |
+| 2020 | 25,551,868 | FFIEC snapshot |
+| 2019 | 17,545,457 | FFIEC snapshot |
+| 2018 | 15,119,651 | FFIEC snapshot |
+| 2017 | 14,285,496 | FFIEC snapshot |
+| 2016 | 16,332,987 | CFPB historic |
+| 2015 | 14,374,184 | CFPB historic |
+| 2014 | 12,049,341 | CFPB historic |
+| 2013 | 17,016,159 | CFPB historic |
+| 2012 | 18,691,551 | CFPB historic |
+| 2011 | 14,873,415 | CFPB historic |
+| 2010 | 16,348,557 | CFPB historic |
+| 2009 | 19,493,491 | CFPB historic |
+| 2008 | 17,391,570 | CFPB historic |
+| 2007 | 26,605,695 | CFPB historic |
+| 2006 | 34,155,358 | ICPSR (38 cols) |
+| 2005 | 36,457,234 | ICPSR (38 cols) |
+| 2004 | 33,630,472 | ICPSR (38 cols) |
+| 2003 | 41,579,147 | ICPSR (23 cols) |
+| 2002 | 31,310,408 | ICPSR (23 cols) |
+| 2001 | 27,643,161 | ICPSR (23 cols) |
+| 2000 | 19,250,595 | ICPSR (23 cols) |
+
+2018-2023 gaps vs CFPB API are due to snapshot-timing lag (late amendments absorbed
+into CFPB live DB after snapshot cut). Not pipeline issues.
 
 ---
 
-## DuckDB Schema
+## Avery Crosswalk Structure
 
-```sql
--- Tables in hmda.duckdb
-avery_crosswalk      -- one row per lender per year (264,721 rows total)
-arid2017_to_lei      -- pre-2018 ARID -> LEI (5,399 rows)
-panel_metadata       -- one row per year: row_count, avery_match_rate, built_at, parquet_path, etc.
+One row per lender per year (not one row per lender).
 
--- View
-lar_panel            -- UNION ALL over all staging/year=*/data.parquet files (union_by_name=true)
+- Pre-2018 section: ~230K rows, keyed on `respondent_id + agency_code + activity_year`
+- Post-2018 section: ~34K rows, keyed on `lei + activity_year`
+- Total: ~264K rows
+- Coverage: 1990-present (Philly Fed HMDA Lender File)
+
+---
+
+## Execution Order
+
+```bash
+python -m hmda.avery            # Load Philly Fed lender crosswalk -> avery_crosswalk
+python -m hmda.arid_xref        # Load ARID2017->LEI crosswalk -> arid2017_to_lei
+
+# For each year (process one at a time to conserve disk):
+python -m hmda.download --year 2024   # not needed for 2000-2006 (manual ICPSR ZIPs)
+python -m hmda.construct --year 2024
+# delete raw\ after each year to reclaim disk (raw TXT: 2-11 GB each)
+
+# 2000-2006: ZIPs must be pre-placed in C:\empirical-data-construction\hmda\raw\
+# Extract with: "C:\Program Files\Git\usr\bin\unzip.exe" HMDA_LAR_{year}.zip
+# Then: python -m hmda.construct --year 2006
+
+python -m hmda.inspect --year 2024   # validate
 ```
-
----
-
-## Column Schema
-
-Columns come from `MASTER_SCHEMA` in `hmda/metadata.py` (96 columns, all VARCHAR from CSV) plus:
-
-- `year` — INTEGER, added by the pipeline
-- `rssd_id`, `parent_rssd`, `top_holder_rssd` — VARCHAR, joined from `avery_crosswalk`
-
-All columns stored as VARCHAR. Cast to numeric at query time as needed.
 
 ---
 
 ## Python Environment
 
-- Virtual environment: `.venv` in the repo root
-- Key packages: `duckdb`, `polars`, `httpx`, `fastexcel`, `openpyxl`
-- Run scripts as modules from the repo root: `python -m hmda.construct --year 2024`
-- Windows note: logging must use ASCII characters only (no em-dash, arrows, etc.) — cp1252 encoding on the console
+- Virtual env: `.venv` in repo root
+- Packages: `duckdb`, `polars`, `httpx`, `fastexcel`, `openpyxl`
+- Run as modules from repo root: `python -m hmda.construct --year 2024`
+- Windows: use ASCII-only logging output (cp1252 terminal -- no em-dash, arrows, etc.)
+
+---
+
+## Key Code Modules
+
+| File | Purpose |
+|------|---------|
+| `config.py` | `FIN_DATA_ROOT` env var, path helpers, DuckDB settings |
+| `hmda/metadata.py` | URL registry, MASTER_SCHEMA, all column rename maps, LABEL_TO_CODE, HARMONIZED_VIEW_EXPRS, ICPSR era constants |
+| `hmda/download.py` | FFIEC/CFPB download with resume and idempotency manifest (2000-2006 not downloadable -- manual ICPSR) |
+| `hmda/construct.py` | Out-of-core DuckDB ETL: four era-specific builders (_post2018, _2017, _cfpb_historic, _icpsr) |
+| `hmda/avery.py` | Philly Fed lender crosswalk ingestion |
+| `hmda/arid_xref.py` | ARID2017->LEI crosswalk loader |
+| `hmda/inspect.py` | Interactive verification (row counts, nulls, RSSD coverage, harmonized cols) |
+
+---
+
+## Known Data Quirks
+
+| Year | Issue |
+|------|-------|
+| 2018 | `loan_amount` max = 2,147,483,647 (INT32_MAX cap in source) |
+| 2019 | 1 record with negative loan_amount (raw data error) |
+| 2020 | 1 record with negative loan_amount (raw data error) |
+| 2023 | ~80K fewer rows than CFPB live API (late amendments absorbed post-snapshot) |
+| 2000-2003 | `lien_status`, `hoepa_status`, `rate_spread`, `preapproval`, `ethnicity` are NULL (pre-reform) |
+| 2000-2003 | Only `applicant_race_1` available; `applicant_race_2` thru `_5` are NULL |
+
+---
+
+## Privacy Replication Warning
+
+The FFIEC **snapshot** public LAR is NOT a 1-record-per-application file. Small lenders
+have each application group replicated ~7x for privacy protection. `COUNT(*)` overcounts
+small-lender applications. For true application counts use the CFPB Data Browser API.
+Large lenders are not replicated (enough volume for anonymity). This applies to the
+FFIEC snapshot years (2017-2024); CFPB historic (2007-2016) and ICPSR (2000-2006) files
+are true 1-record-per-application files.
+
+---
+
+## Sanity Check Completed
+
+Replicated CFPB Table 4 (Home-Purchase and Refinance Loan Denial Rates by Enhanced
+Loan Types and Race/Ethnicity, 2018-2020) using the built data. Results match
+published values within 0.1-0.3pp for aggregate rows. Slightly larger gaps (~1pp)
+for "Other minority" and "Joint" rows are attributable to the CFPB's proprietary
+"enhanced race" classification methodology (documented in Table 2, Note 1 of the
+CFPB HMDA Data Overview report) which applies a specific priority ordering for
+multi-race and mixed-household records not fully specified in public documentation.
+
+2006/2007 cross-era validation: census tract count (65,871 vs 65,787), median income
+($72.1K vs $72.3K), and code systems confirmed consistent. 2006 has more rows (34.2M
+vs 26.6M) consistent with the housing bubble peak.

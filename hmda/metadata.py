@@ -11,14 +11,23 @@ from __future__ import annotations
 from typing import Final
 
 # ── Era boundaries ─────────────────────────────────────────────────────────────
-FIRST_YEAR: Final[int] = 2007
+FIRST_YEAR: Final[int] = 2000
 LAST_YEAR: Final[int] = 2024
 
-ALL_YEARS: Final[list[int]] = list(range(LAST_YEAR, FIRST_YEAR - 1, -1))  # 2024 → 2007
+ALL_YEARS: Final[list[int]] = list(range(LAST_YEAR, FIRST_YEAR - 1, -1))  # 2024 → 2000
 
 # CFPB historic data portal years (comma-delimited CSV, labeled values, header row)
 CFPB_HISTORIC_FIRST_YEAR: Final[int] = 2007
 CFPB_HISTORIC_LAST_YEAR: Final[int] = 2016
+
+# ICPSR OpenICPSR pre-CFPB years (pipe-delimited, header row, pure numeric codes)
+# Two sub-eras:
+#   2004-2006: 38 cols (post-2004 HMDA reform — added ethnicity, race_2-5, preapproval,
+#              property_type, rate_spread, hoepa_status, lien_status)
+#   2000-2003: 23 cols (pre-reform — only race_1, no ethnicity, no preapproval etc.)
+ICPSR_FIRST_YEAR: Final[int] = 2000
+ICPSR_LAST_YEAR: Final[int] = 2006
+ICPSR_REFORM_YEAR: Final[int] = 2004   # first year with expanded 38-col schema
 
 
 # ── Download URL registry ──────────────────────────────────────────────────────
@@ -65,15 +74,19 @@ NARA_API_TMPL: Final[str] = (
 def get_source_urls(year: int) -> list[str]:
     """
     Return an ordered list of candidate download URLs for a given year.
-    Supported range: 2007-2024.
+    Supported range: 2000-2024.
 
     Era routing:
       2018-2024 → FFIEC snapshot pipe file
       2017      → FFIEC snapshot txt file (different filename convention)
       2007-2016 → CFPB historic data portal (comma-delimited labeled CSV)
+      2000-2006 → ICPSR OpenICPSR (manually downloaded; no auto-download URL)
     """
-    if year > 2024 or year < 2007:
-        raise ValueError(f"Year {year} outside supported range 2007-2024")
+    if year > 2024 or year < 2000:
+        raise ValueError(f"Year {year} outside supported range 2000-2024")
+    if year <= 2006:
+        # ICPSR files are downloaded manually; no public URL to return
+        return []
     if year == 2017:
         return [SNAPSHOT_2017_URL]
     if year >= 2018:
@@ -83,18 +96,31 @@ def get_source_urls(year: int) -> list[str]:
 
 
 def is_pipe_delimited(year: int) -> bool:
-    """2017-2024 are pipe-delimited; 2007-2016 CFPB historic files are comma-delimited."""
-    return year >= 2017
+    """2000-2006 ICPSR and 2017-2024 FFIEC are pipe-delimited; 2007-2016 CFPB are comma."""
+    return year >= 2017 or year <= 2006
 
 
 def get_delimiter(year: int) -> str:
     """Return the field delimiter character for the raw LAR file of the given year."""
-    return "|" if year >= 2017 else ","
+    if year >= 2017 or year <= 2006:
+        return "|"
+    return ","   # 2007-2016 CFPB historic files are comma-delimited
 
 
 def is_pre_2018(year: int) -> bool:
     """Return True for years using the pre-reform HMDA LAR schema (2017 and earlier)."""
     return year < 2018
+
+
+def is_icpsr(year: int) -> bool:
+    """Return True for ICPSR OpenICPSR pre-CFPB years (2000-2006).
+
+    These files are pipe-delimited with a header row and use pure numeric codes
+    (no text labels). Two sub-eras exist:
+      2004-2006: 38-col expanded schema (post-2004 HMDA reform)
+      2000-2003: 23-col reduced schema (pre-2004 reform — missing ethnicity, race_2-5, etc.)
+    """
+    return ICPSR_FIRST_YEAR <= year <= ICPSR_LAST_YEAR
 
 
 def is_cfpb_historic(year: int) -> bool:
@@ -401,6 +427,29 @@ COLUMN_RENAMES_CFPB_HISTORIC: Final[dict[str, str]] = {
     "number_of_1_to_4_family_units":        "tract_one_to_four_family_homes",
     "tract_one_to_four_family_housing_units": "tract_one_to_four_family_homes",
 }
+
+# ── ICPSR (2000-2006) column rename mapping ───────────────────────────────────
+# Maps raw ICPSR pipe-delimited column names → MASTER_SCHEMA column names.
+# All values in these files are already numeric codes (no label conversion needed).
+#
+# 2004-2006 (38 cols): occupancy, msamd, applicant_ethnicity, co_applicant_ethnicity
+# 2000-2003 (23 cols): msamd only (occupancy_type already correct)
+COLUMN_RENAMES_ICPSR: Final[dict[str, str]] = {
+    # Occupancy (2004-2006 uses 'occupancy'; 2000-2003 already uses 'occupancy_type')
+    "occupancy":                "occupancy_type",
+    # MSA/MD (both sub-eras use 'msamd' without underscore)
+    "msamd":                    "derived_msa_md",
+    # Ethnicity (2004-2006 only; 2000-2003 has no ethnicity columns)
+    "applicant_ethnicity":      "applicant_ethnicity_1",
+    "co_applicant_ethnicity":   "co_applicant_ethnicity_1",
+}
+
+# Columns in ICPSR files with no master-schema equivalent → DROP.
+COLS_TO_DROP_ICPSR: Final[set[str]] = {
+    "edit_status",
+    "sequence_number",
+}
+
 
 # Columns in CFPB historic CSVs that have no master-schema equivalent → DROP.
 # The CFPB "labels" files include both code columns AND label columns for each field.

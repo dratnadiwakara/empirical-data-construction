@@ -59,6 +59,14 @@ EXPECTED_ROWS: dict[int, int] = {
     2009: 19_493_491,
     2008: 17_391_570,
     2007: 26_605_695,
+    # ICPSR OpenICPSR pre-CFPB years — row counts from raw file header scans
+    2006: 34_155_358,
+    2005: 36_457_234,
+    2004: 33_630_472,
+    2003: 41_579_147,
+    2002: 31_310_408,
+    2001: 27_643_161,
+    2000: 19_250_595,
 }
 
 # Variables where code sets differ between 2017 and 2018+

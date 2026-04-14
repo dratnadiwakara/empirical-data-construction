@@ -114,3 +114,45 @@ def get_cra_staging_path(table_type: str, year: int) -> Path:
 def get_cra_manifest_path() -> Path:
     """Path to the CRA download idempotency manifest JSON."""
     return get_cra_storage_path() / "download_manifest.json"
+
+
+# ── NIC path helpers ─────────────────────────────────────────────────────────
+
+NIC_DATASET = "nic"
+
+NIC_USER_AGENT = (
+    "NIC-Research-Pipeline/1.0 "
+    "(academic; empirical-data-construction; "
+    "https://github.com/dratnadiwakara/empirical-data-construction)"
+)
+
+
+def get_nic_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the NIC dataset folder on the external HDD."""
+    path = HDD_PATH / NIC_DATASET / subdataset if subdataset else HDD_PATH / NIC_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_nic_duckdb_path() -> Path:
+    """Path to the master NIC DuckDB database."""
+    return get_nic_storage_path() / "nic.duckdb"
+
+
+def get_nic_raw_path() -> Path:
+    """Raw download directory for NIC snapshots."""
+    p = get_nic_storage_path("raw")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_nic_staging_path(dataset: str) -> Path:
+    """Staging Parquet directory for a NIC dataset."""
+    p = get_nic_storage_path("staging") / dataset
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_nic_manifest_path() -> Path:
+    """Path to the NIC download idempotency manifest JSON."""
+    return get_nic_storage_path() / "download_manifest.json"

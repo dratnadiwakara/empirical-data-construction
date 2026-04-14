@@ -1,5 +1,5 @@
 """
-HMDA LAR ETL (2007-2024).
+HMDA LAR ETL (2000-2024).
 
 Uses DuckDB's out-of-core engine to read the pipe-delimited or comma-delimited LAR
 CSV and write directly to Parquet — without loading the full dataset into Python
@@ -12,14 +12,19 @@ Era dispatch:
   2007-2016  Pre-reform CFPB: comma-delimited, header, ~45 cols.
              Same transforms as 2017.  Text labels converted to numeric codes via
              LABEL_TO_CODE CASE expressions (handles both labeled and coded files).
+  2000-2006  ICPSR: pipe-delimited, header, pure numeric codes.
+             2004-2006: 38 cols (post-2004 reform — has ethnicity, race_2-5, etc.)
+             2000-2003: 23 cols (pre-2004 reform — only race_1, no ethnicity, etc.)
+             loan_amount ×1000, census_tract FIPS construction, column renames.
 
 Usage
 -----
     python -m hmda.construct --year 2024          # process single year (start here)
     python -m hmda.construct --year 2016          # process 2016 (CFPB historic)
     python -m hmda.construct --year 2017          # process 2017 (FFIEC pre-reform)
+    python -m hmda.construct --year 2006          # process 2006 (ICPSR)
     python -m hmda.construct --year 2024 --force  # reprocess even if Parquet exists
-    python -m hmda.construct --all                # 2024 -> 2007 (after 2024 confirmed)
+    python -m hmda.construct --all                # 2024 -> 2000 (after 2024 confirmed)
 """
 from __future__ import annotations
 
@@ -48,8 +53,10 @@ from hmda.metadata import (
     CENSUS_TRACT_SQL_2017,
     CFPB_HISTORIC_CATEGORICAL_COLS,
     COLS_TO_DROP_CFPB_HISTORIC,
+    COLS_TO_DROP_ICPSR,
     COLUMN_RENAMES_2017,
     COLUMN_RENAMES_CFPB_HISTORIC,
+    COLUMN_RENAMES_ICPSR,
     COLUMNS_2017,
     LOAN_AMOUNT_SCALE_SQL_2017,
     MASTER_SCHEMA,
@@ -57,6 +64,7 @@ from hmda.metadata import (
     build_label_case_sql,
     get_delimiter,
     is_cfpb_historic,
+    is_icpsr,
     is_pre_2018,
 )
 from utils.duckdb_utils import (
@@ -119,6 +127,7 @@ def _build_select_exprs(
       2018+      → _build_select_exprs_post2018  (pass-through, NULL-fill missing)
       2017       → _build_select_exprs_2017      (FFIEC no-header, pipe-delimited)
       2007-2016  → _build_select_exprs_cfpb_historic  (CFPB comma-CSV, label→code)
+      2000-2006  → _build_select_exprs_icpsr     (ICPSR pipe-delimited, pure codes)
 
     Returns:
         select_sql       : comma-joined SQL expressions for the SELECT clause
@@ -126,6 +135,8 @@ def _build_select_exprs(
         cols_null_filled : MASTER_SCHEMA cols absent in CSV (will be NULL)
         cols_dropped     : CSV cols not in MASTER_SCHEMA (silently ignored)
     """
+    if is_icpsr(year):
+        return _build_select_exprs_icpsr(csv_cols)
     if is_cfpb_historic(year):
         return _build_select_exprs_cfpb_historic(csv_cols)
     if year == 2017:
@@ -261,6 +272,115 @@ def _build_select_exprs_2017(
             exprs.append(f'NULL AS "{col}"')
 
     # Append pre-2018 identifier columns
+    exprs.extend(extra_exprs)
+
+    all_present = cols_present + cols_present_extra
+    return ", ".join(exprs), all_present, cols_null_filled, cols_dropped
+
+
+def _build_select_exprs_icpsr(
+    csv_cols: list[str],
+) -> tuple[str, list[str], list[str], list[str]]:
+    """
+    SELECT expression builder for ICPSR 2000-2006 pipe-delimited files.
+
+    Two sub-eras (column count differs; the builder handles both generically):
+      2004-2006: 38 cols — includes ethnicity, race_2-5, preapproval, property_type,
+                           rate_spread, hoepa_status, lien_status.
+      2000-2003: 23 cols — only race_1 per applicant/co-applicant; no ethnicity;
+                           no preapproval, property_type, rate_spread, hoepa_status,
+                           lien_status, or census tract demographics.
+
+    All categorical values are already numeric codes (no label conversion).
+    loan_amount is stored in $000s → scaled ×1000 at ETL time.
+    census_tract is XXXX.XX format → 11-char FIPS constructed from state+county+tract.
+    """
+    raw_to_master: dict[str, str] = {}
+    for col in csv_cols:
+        raw_to_master[col] = COLUMN_RENAMES_ICPSR.get(col, col)
+
+    master_set = set(MASTER_SCHEMA)
+    master_sql: dict[str, str] = {}
+
+    for raw_col in csv_cols:
+        master_col = raw_to_master[raw_col]
+
+        if raw_col in COLS_TO_DROP_ICPSR:
+            continue
+
+        if master_col not in master_set:
+            continue
+
+        if master_col == "loan_amount":
+            # Source stores loan_amount in $000s — scale to whole dollars.
+            # The column is named 'loan_amount' (not 'loan_amount_000s') but same logic.
+            scaled_expr = (
+                LOAN_AMOUNT_SCALE_SQL_2017
+                .replace("loan_amount_000s", f'"{raw_col}"')
+            )
+            master_sql[master_col] = f'({scaled_expr}) AS "loan_amount"'
+
+        elif master_col == "census_tract":
+            master_sql[master_col] = "__census_tract_placeholder__"
+
+        else:
+            safe_raw    = f'"{raw_col}"'
+            safe_master = f'"{master_col}"'
+            if raw_col == master_col:
+                master_sql[master_col] = f'lar.{safe_raw}'
+            else:
+                master_sql[master_col] = f'lar.{safe_raw} AS {safe_master}'
+
+    # Census tract: construct 11-char FIPS from state + county + raw tract (XXXX.XX).
+    raw_state  = next((c for c in csv_cols if c.lower() == "state_code"),   None)
+    raw_county = next((c for c in csv_cols if c.lower() == "county_code"),  None)
+    raw_tract  = next((c for c in csv_cols if c.lower() == "census_tract"), None)
+
+    if raw_tract:
+        if raw_state and raw_county:
+            tract_expr = (
+                CENSUS_TRACT_SQL_2017
+                .replace("state_code",   f'"{raw_state}"')
+                .replace("county_code",  f'"{raw_county}"')
+                .replace("census_tract", f'"{raw_tract}"')
+            )
+            master_sql["census_tract"] = f'({tract_expr}) AS "census_tract"'
+        else:
+            logger.warning(
+                "[ICPSR] state_code or county_code not found; "
+                "census_tract will be passed through as-is"
+            )
+            master_sql["census_tract"] = f'lar."{raw_tract}" AS "census_tract"'
+
+    # Pre-2018 identifier columns — kept for analysis-time RSSD join.
+    pre2018_extra = ["respondent_id", "agency_code", "property_type"]
+    extra_exprs: list[str] = []
+    for col in pre2018_extra:
+        if col in csv_cols:
+            extra_exprs.append(f'lar."{col}" AS "{col}"')
+            master_sql[col] = f'lar."{col}"'   # sentinel for metadata counting
+
+    # Classify for metadata reporting
+    cols_present_extra = [c for c in pre2018_extra if c in master_sql]
+    cols_present       = [c for c in MASTER_SCHEMA if c in master_sql]
+    cols_null_filled   = [c for c in MASTER_SCHEMA if c not in master_sql]
+    cols_dropped       = [
+        c for c in csv_cols
+        if raw_to_master.get(c, c) not in master_set
+        and c not in pre2018_extra
+        and c not in COLS_TO_DROP_ICPSR
+    ]
+
+    exprs = []
+    for col in MASTER_SCHEMA:
+        if col in master_sql:
+            expr = master_sql[col]
+            if expr == "__census_tract_placeholder__":
+                exprs.append(f'NULL AS "census_tract"')
+            else:
+                exprs.append(expr)
+        else:
+            exprs.append(f'NULL AS "{col}"')
     exprs.extend(extra_exprs)
 
     all_present = cols_present + cols_present_extra
@@ -603,12 +723,12 @@ def construct_year(year: int, force: bool = False) -> bool:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Construct HMDA LAR panel (2007-2024): raw -> Parquet -> DuckDB."
+        description="Construct HMDA LAR panel (2000-2024): raw -> Parquet -> DuckDB."
     )
     grp = p.add_mutually_exclusive_group()
-    grp.add_argument("--year", type=int, help="Process a single year (2007-2024)")
+    grp.add_argument("--year", type=int, help="Process a single year (2000-2024)")
     grp.add_argument("--all", dest="all_years", action="store_true",
-                     help="Process all years 2024 -> 2007")
+                     help="Process all years 2024 -> 2000")
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if staging Parquet already exists")
     return p.parse_args()

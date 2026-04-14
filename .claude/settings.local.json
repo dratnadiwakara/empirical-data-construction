@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:ffiec.cfpb.gov)",
+      "WebFetch(domain:sites.google.com)",
+      "WebFetch(domain:www.philadelphiafed.org)",
+      "WebFetch(domain:files.consumerfinance.gov)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.consumerfinance.gov)",
+      "WebFetch(domain:www.ffiec.gov)",
+      "WebFetch(domain:equityindicators.org)",
+      "WebFetch(domain:s3.amazonaws.com)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(.venv/Scripts/pip list:*)",
+      "Bash(.venv/Scripts/pip install:*)"
+    ]
+  }
+}

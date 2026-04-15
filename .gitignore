@@ -1,2 +1,3 @@
 .venv/
 hmda/.venv_linux/
+*.csv

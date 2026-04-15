@@ -18,6 +18,19 @@ The project is organized by dataset. Each folder is self-contained:
 - **Data (Local)**: All "heavy" files (Raw CSV/ZIP, Staging Parquet, Final `.duckdb`) **MUST** be stored under `C:\empirical-data-construction`.
 - **Path Resolution**: Never hardcode absolute local paths. Use a central `FIN_DATA_ROOT` environment variable (default: `C:\empirical-data-construction`) or the `config.py` utility to resolve paths.
 
+## Python Environment
+- **Virtual Environment**: Always use `C:\envs\.basic_venv` for all Python execution in this project.
+  - Activate: `C:\envs\.basic_venv\Scripts\activate` (Windows) or `source C:/envs/.basic_venv/Scripts/activate` (bash/WSL)
+  - Run scripts: `C:\envs\.basic_venv\Scripts\python.exe <script>` or prefix with the activated venv
+  - Install packages: `C:\envs\.basic_venv\Scripts\pip.exe install <package>`
+- Never use the system Python or any other virtual environment for this project.
+
+## R Environment
+- **R Installation**: `C:\Program Files\R\R-4.4.1`
+  - Run R scripts: `"C:\Program Files\R\R-4.4.1\bin\Rscript.exe" <script.R>`
+  - Interactive R: `"C:\Program Files\R\R-4.4.1\bin\R.exe"`
+- Always use this R installation for all R scripts in this project.
+
 ## Technical Stack & Constraints
 - **Primary Languages**: Python 3.10+, SQL.
 - **Processing**:

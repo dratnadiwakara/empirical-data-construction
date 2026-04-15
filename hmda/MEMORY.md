@@ -442,6 +442,80 @@ are true 1-record-per-application files.
 
 ---
 
+## Analytical Lessons from External Replication Work
+
+### Lender Classification (Bank vs Nonbank)
+
+Agency code alone is an imperfect proxy for depository status. Some large
+independent mortgage companies file HMDA under FDIC (agency_code=3) despite
+accepting no deposits. For research requiring a clean bank/nonbank split, supplement
+agency_code with external lists (e.g., FDIC institution directory or manual review
+of top lenders). Rule of thumb: agency_code IN ('1','2','3','5','9') covers
+most depositories, but verify any lender with agency_code=3 that is known to be
+a mortgage company.
+
+### Lender-Level Aggregation (Holding Company Consolidation)
+
+A single institution can file under multiple respondent_ids (e.g., the bank's main
+charter plus a home-mortgage subsidiary). When computing institution-level market
+shares or loan volumes, summing by respondent_id undercounts large multi-charter
+banks. Use `avery_crosswalk.top_holder_rssd` to roll up to the holding-company level.
+Individual respondent-level volumes will match published figures closely for standalone
+entities (nonbanks, smaller banks) but diverge for large banking groups.
+
+### Lender Identification Across Years (Avery Name Lookup)
+
+The same institution can appear under 3-5 different `respondent_name` strings in the
+Avery crosswalk across years (e.g., "LOANDEPOT.COM", "LOANDEPOT.COM LLC",
+"LOANDEPOT.COM, LLC"). Always use `LIKE`/`LOWER()` pattern matching when searching
+by name, and return `DISTINCT respondent_id` to collapse duplicates. Confirm the
+match is unique by checking the respondent_id is the same across all name variants.
+
+### Time-Conditional Lender Attributes
+
+Lender characteristics that change over time (ownership type, product mix, regulatory
+status) must be applied as year-conditional flags, not static labels. Assigning a
+time-varying attribute for all years when a lender only had that attribute after a
+specific year inflates counts by 15-50% depending on how far back the history extends.
+Always record the adoption/change year and include `AND l.year >= {adoption_year}` in
+the CASE expression.
+
+### Jumbo Loan Classification (Pre-2018)
+
+The `conforming_loan_limit` column is only available 2018+. For 2000-2017, the
+national baseline conforming loan limit (CLL) was $417,000 (2006-2016) and varies by
+year before that. However, high-cost MSAs have local CLLs up to $625,500 during
+2009-2016. Using the flat national CLL will overcount jumbos by ~3pp in the originated
+sample because loans of $418K-$625K in high-cost areas are conforming. For a precise
+jumbo flag pre-2018, bring in the FHFA county-level CLL file and join on state_code +
+county_code + year.
+
+### No Co-Applicant Identification (Pre-2018)
+
+In the CFPB historic (2007-2016) and ICPSR (2000-2006) data, a solo application
+has `co_applicant_sex = '4'` ("Not applicable"). Use `co_applicant_sex IN ('4','5')`
+to be safe across slightly varying file encodings. Do NOT use NULL to detect solo
+applications; co_applicant_sex is populated for all records.
+
+### LTI Computation
+
+Loan-to-income ratio: `loan_amount / (income * 1000)` because loan_amount is whole
+dollars and income is $000s. Always winsorize at symmetric tails (0.5%/99.5%) before
+computing means; the raw distribution has extreme outliers from very low income reports.
+Filter `income > 0 AND loan_amount > 0` before the LTI calculation (not just IS NOT
+NULL, since 0 income records exist in the data).
+
+### Sample Period Truncation in Annual Data
+
+Public HMDA records activity_year only (not the exact application or action date).
+Research using half-year or quarterly HMDA cuts cannot be exactly replicated with the
+public data. Full-year samples will have ~5-10% more observations than a H1-only or
+H2-only sample of the same year, and the composition shifts because purchase loan
+activity is seasonal (peaks in spring/summer) while refinance activity responds to
+rate movements throughout the year.
+
+---
+
 ## Sanity Check Completed
 
 Replicated CFPB Table 4 (Home-Purchase and Refinance Loan Denial Rates by Enhanced

@@ -1,3 +1,5 @@
 .venv/
 hmda/.venv_linux/
 *.csv
+__pycache__/
+*.pyc

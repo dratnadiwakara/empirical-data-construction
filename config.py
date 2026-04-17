@@ -156,3 +156,34 @@ def get_nic_staging_path(dataset: str) -> Path:
 def get_nic_manifest_path() -> Path:
     """Path to the NIC download idempotency manifest JSON."""
     return get_nic_storage_path() / "download_manifest.json"
+
+
+# ── Call Reports CFLV path helpers ───────────────────────────────────────────
+
+CFLV_DATASET = "call-reports-CFLV"
+
+
+def get_cflv_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the CFLV dataset folder on the HDD."""
+    path = HDD_PATH / CFLV_DATASET / subdataset if subdataset else HDD_PATH / CFLV_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_cflv_duckdb_path() -> Path:
+    """Path to the CFLV DuckDB database."""
+    return get_cflv_storage_path() / "call-reports-cflv.duckdb"
+
+
+def get_cflv_raw_path() -> Path:
+    """Directory for extracted raw .dta files."""
+    p = get_cflv_storage_path("raw")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_cflv_staging_path(table: str) -> Path:
+    """Hive-partitioned Parquet staging directory for a given table."""
+    p = get_cflv_storage_path("staging") / table
+    p.mkdir(parents=True, exist_ok=True)
+    return p

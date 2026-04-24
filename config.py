@@ -187,3 +187,93 @@ def get_cflv_staging_path(table: str) -> Path:
     p = get_cflv_storage_path("staging") / table
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+# ── Call Reports FFIEC path helpers ──────────────────────────────────────────
+
+FFIEC_DATASET = "call-reports-FFIEC"
+
+FFIEC_USER_AGENT = (
+    "FFIEC-Call-Reports-Pipeline/1.0 "
+    "(academic; empirical-data-construction; "
+    "https://github.com/dratnadiwakara/empirical-data-construction)"
+)
+
+
+def get_ffiec_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the FFIEC Call Reports dataset folder on the HDD."""
+    path = HDD_PATH / FFIEC_DATASET / subdataset if subdataset else HDD_PATH / FFIEC_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_ffiec_duckdb_path() -> Path:
+    """Path to the master FFIEC Call Reports DuckDB database."""
+    return get_ffiec_storage_path() / "call-reports-ffiec.duckdb"
+
+
+def get_ffiec_raw_path(year: int, quarter: int) -> Path:
+    """Raw extracted directory for one (year, quarter)."""
+    p = get_ffiec_storage_path("raw") / f"{year}Q{quarter}"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_ffiec_staging_path(schedule: str, year: int, quarter: int) -> Path:
+    """Hive-partitioned Parquet staging directory for (schedule, year, quarter)."""
+    p = (
+        get_ffiec_storage_path("staging")
+        / schedule
+        / f"year={year}"
+        / f"quarter={quarter}"
+    )
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_ffiec_manifest_path() -> Path:
+    """Path to the FFIEC Call Reports download/extract manifest JSON."""
+    return get_ffiec_storage_path() / "download_manifest.json"
+
+
+def get_ffiec_mdrm_path() -> Path:
+    """Directory holding the MDRM dictionary (MDRM.zip + MDRM.csv)."""
+    p = get_ffiec_storage_path("mdrm")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+# ── PERMCO-RSSD link path helpers ─────────────────────────────────────────────
+
+PERMCO_RSSD_DATASET = "permco-rssd-link"
+
+
+def get_permco_rssd_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the permco-rssd-link dataset folder on the HDD."""
+    path = HDD_PATH / PERMCO_RSSD_DATASET / subdataset if subdataset else HDD_PATH / PERMCO_RSSD_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_permco_rssd_duckdb_path() -> Path:
+    """Path to the permco-rssd-link DuckDB database."""
+    return get_permco_rssd_storage_path() / "permco-rssd-link.duckdb"
+
+
+def get_permco_rssd_raw_path() -> Path:
+    """Raw directory for the source CRSP-FRB link CSV."""
+    p = get_permco_rssd_storage_path("raw")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_permco_rssd_staging_path() -> Path:
+    """Staging Parquet directory for the crsp_frb_link table."""
+    p = get_permco_rssd_storage_path("staging") / "crsp_frb_link"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_permco_rssd_manifest_path() -> Path:
+    """Path to the permco-rssd-link download manifest JSON."""
+    return get_permco_rssd_storage_path() / "download_manifest.json"

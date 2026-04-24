@@ -5,6 +5,39 @@ using the HMDA (Home Mortgage Disclosure Act) panel built in this pipeline.
 
 ---
 
+## ⚠️ CRITICAL: Always Query the `lar_panel` VIEW — Never Raw Parquet
+
+**DO**: query the `lar_panel` VIEW inside `hmda.duckdb`.
+**DO NOT**: run `read_parquet()` directly on files under
+`C:\empirical-data-construction\hmda\staging\year=*/data.parquet`.
+
+Raw Parquet is faithful to source — it is **not harmonized**:
+
+- `state_code` / `county_code` — pre-2018 drops leading zeros
+  (`'1'` instead of `'01'`); 2018+ stores full 5-digit FIPS in `county_code`.
+  The VIEW LPADs pre-2018 and splits 2018+ into consistent 2-char state + 3-char
+  county. The VIEW also exposes a derived `county_fips` (5-char) column that
+  does not exist in Parquet.
+- Harmonized cross-era categorical columns
+  (`loan_purpose_harmonized`, `purchaser_type_harmonized`,
+  `denial_reason_1/2/3_harmonized`, `preapproval_harmonized`) are
+  VIEW-only — they bridge 2017/2018 code differences and do not exist
+  in raw Parquet.
+
+Harmonization logic lives in `utils/duckdb_utils.py::recreate_lar_view` and is
+re-applied every time `construct.py` runs (including when new years are added).
+Bypassing the VIEW silently gives era-inconsistent results.
+
+```sql
+-- GOOD
+SELECT state_code, county_code, county_fips FROM lar_panel WHERE year = 2024;
+
+-- BAD — unharmonized, no county_fips, pre-2018 lost zero-padding
+SELECT * FROM read_parquet('C:/empirical-data-construction/hmda/staging/year=2003/data.parquet');
+```
+
+---
+
 ## Quick Connection
 
 ```python
@@ -272,6 +305,27 @@ WHERE census_tract = '48201222100'
 WHERE state_code = '48'   -- Texas
 WHERE state_code = '06'   -- California
 ```
+
+### By county
+Three harmonized geography columns in `lar_panel`:
+- `state_code` — always 2-char state FIPS (e.g. `'06'`)
+- `county_code` — always 3-char county-within-state FIPS (e.g. `'037'`)
+- `county_fips` — derived 5-char full state+county FIPS (e.g. `'06037'`)
+
+```sql
+-- Los Angeles County, CA
+WHERE county_fips = '06037'
+
+-- All counties in Texas
+WHERE state_code = '48'
+```
+
+Semantics harmonized across all years via the `lar_panel` VIEW (see
+`utils/duckdb_utils.py::recreate_lar_view`): pre-2018 raw Parquet has
+unpadded state/county (source drops leading zeros); 2018+ raw Parquet
+has full 5-digit FIPS in the `county_code` column. The VIEW pads
+pre-2018 and splits 2018+ so all years follow the same 2/3/5-char
+convention.
 
 ### By MSA/MD
 ```sql

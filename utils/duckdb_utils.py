@@ -130,10 +130,51 @@ def recreate_lar_view(
         for col, expr in HARMONIZED_VIEW_EXPRS.items()
     )
 
+    # state_code: always 2-char zero-padded FIPS.
+    #   pre-2018: LPAD raw state_code (source often drops leading zeros)
+    #   2018+:    CFPB county_code already contains state+county -> take first 2 chars
+    state_code_harmonized = """
+        CASE
+            WHEN year >= 2018 AND county_code IS NOT NULL
+                 AND TRIM(county_code) NOT IN ('', 'NA', 'na')
+                THEN SUBSTR(LPAD(TRIM(county_code), 5, '0'), 1, 2)
+            WHEN state_code IS NULL OR TRIM(state_code) IN ('', 'NA', 'na')
+                THEN NULL
+            ELSE LPAD(TRIM(state_code), 2, '0')
+        END
+    """
+
+    # county_code: always 3-char zero-padded county-within-state.
+    #   pre-2018: LPAD to 3 (source drops leading zeros)
+    #   2018+:    CFPB county_code is 5-char state+county -> keep last 3
+    county_code_harmonized = """
+        CASE
+            WHEN county_code IS NULL OR TRIM(county_code) IN ('', 'NA', 'na')
+                THEN NULL
+            WHEN year >= 2018
+                THEN SUBSTR(LPAD(TRIM(county_code), 5, '0'), 3, 3)
+            ELSE LPAD(TRIM(county_code), 3, '0')
+        END
+    """
+
+    # county_fips: derived full 5-char state+county FIPS
+    county_fips_derived = f"""
+        CASE
+            WHEN ({state_code_harmonized}) IS NULL
+              OR ({county_code_harmonized}) IS NULL
+                THEN NULL
+            ELSE ({state_code_harmonized}) || ({county_code_harmonized})
+        END
+    """
+
     view_sql = f"""
         CREATE OR REPLACE VIEW lar_panel AS
         SELECT
-            *,
+            * REPLACE (
+                ({state_code_harmonized})  AS state_code,
+                ({county_code_harmonized}) AS county_code
+            ),
+            ({county_fips_derived}) AS county_fips,
             {harmonized_sql}
         FROM read_parquet(
             [{paths_sql}],

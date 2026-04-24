@@ -94,6 +94,17 @@ All columns are stored as **VARCHAR**. Cast to numeric at query time using
 
 Core identifiers: `activity_year`, `lei`, `derived_msa_md`, `state_code`, `county_code`, `census_tract`
 
+**Geography columns are harmonized at the `lar_panel` VIEW layer** (see
+`utils/duckdb_utils.py::recreate_lar_view`), not in raw Parquet:
+- `state_code` — always 2-char state FIPS across all years
+- `county_code` — always 3-char county-within-state FIPS across all years
+- `county_fips` — derived 5-char full state+county FIPS (VIEW-only column)
+
+Raw Parquet is faithful to source: pre-2018 drops leading zeros (`state_code='1'`
+for AL, `county_code='1'` for county 001); 2018+ CFPB stores the 5-digit full
+state+county FIPS in the `county_code` column. The VIEW LPADs pre-2018 and
+splits 2018+ so queries see one consistent convention.
+
 Loan characteristics: `loan_type`, `loan_purpose`, `lien_status`, `loan_amount`, `interest_rate`,
 `rate_spread`, `hoepa_status`, `total_loan_costs`, `loan_term`, `conforming_loan_limit`,
 `combined_loan_to_value_ratio`, `property_value`, `debt_to_income_ratio`,

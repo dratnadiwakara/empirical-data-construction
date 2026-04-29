@@ -13,7 +13,14 @@
       "WebFetch(domain:s3.amazonaws.com)",
       "Bash(.venv/Scripts/python:*)",
       "Bash(.venv/Scripts/pip list:*)",
-      "Bash(.venv/Scripts/pip install:*)"
+      "Bash(.venv/Scripts/pip install:*)",
+      "WebFetch(domain:banks.data.fdic.gov)",
+      "WebFetch(domain:api.fdic.gov)",
+      "Bash(C:\\\\envs\\\\.basic_venv\\\\Scripts\\\\python.exe -c \"from sod.metadata import ALL_YEARS, FIRST_YEAR, LAST_YEAR, API_FIELDS; print\\(f'Years: {FIRST_YEAR}-{LAST_YEAR}, count={len\\(ALL_YEARS\\)}, fields={len\\(API_FIELDS\\)}'\\)\")",
+      "Bash(/c/envs/.basic_venv/Scripts/python.exe -c \"from sod.metadata import ALL_YEARS, FIRST_YEAR, LAST_YEAR, API_FIELDS; print\\(f'Years: {FIRST_YEAR}-{LAST_YEAR}, count={len\\(ALL_YEARS\\)}, fields={len\\(API_FIELDS\\)}'\\)\")",
+      "Bash(/c/envs/.basic_venv/Scripts/python.exe -c ' *)",
+      "Bash(/c/envs/.basic_venv/Scripts/python.exe -m sod.download --year 2024)",
+      "Bash(/c/envs/.basic_venv/Scripts/python.exe -m sod.construct --year 2024)"
     ]
   }
 }

@@ -1,8 +1,7 @@
-SOD data - back to 1987
+[X] SOD data - back to 1987
 
-Call reports data
+[X] Call reports data
 
-RSSD-PERMCO-TICKER-BBGUID link
+[X] RSSD-PERMCO-TICKER-BBGUID link
 
-
-Generate the regression table, but render it as a Matplotlib figure so it pops up in a window.
+[X] Generate the regression table, but render it as a Matplotlib figure so it pops up in a window.

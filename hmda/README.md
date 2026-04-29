@@ -90,10 +90,38 @@ extract with `unzip` from Git (`C:\Program Files\Git\usr\bin\unzip.exe`) -- Pyth
 
 | Column | Unit | Rule |
 |--------|------|------|
-| `loan_amount` | Whole dollars | Ready to use. Pre-2018 source was $000s; ETL already scaled x1000 |
+| `loan_amount` | **Whole dollars in ALL years** — DO NOT multiply by 1000 | Public LAR pre-2018 was $000s; ETL already scaled ×1000 at ingest. The VIEW serves dollars. |
 | `income` | **$000s in ALL years** | Must multiply x1000 to get dollar income |
 | `census_tract` | 11-char FIPS string | Matches across all years |
 | `interest_rate` | Percent string, e.g. "4.5" | 2018+ only; NULL pre-2018 |
+
+### ⚠️ `loan_amount` is already in dollars — common mistake
+
+Public-source HMDA documentation says pre-2018 LAR `loan_amount` is in thousands and 2018+ is in dollars. **That distinction does not apply to this DuckDB.** The pipeline pre-converts pre-2018 values to whole dollars at ingest, so the `lar_panel` VIEW serves `loan_amount` in dollars uniformly across 2000–2024.
+
+Quick sanity check (any year):
+
+```sql
+SELECT year,
+       MIN(TRY_CAST(loan_amount AS DOUBLE))                               AS min_amt,
+       APPROX_QUANTILE(TRY_CAST(loan_amount AS DOUBLE), 0.5)              AS median_amt
+FROM lar_panel
+WHERE year IN (2016, 2018) AND action_taken = '1' AND loan_purpose = '1'
+GROUP BY year ORDER BY year;
+-- year  min_amt  median_amt
+-- 2016   1000     ~200000
+-- 2018   5000     ~214000   <- already dollars in BOTH years
+```
+
+Concrete failure mode: comparing `loan_amount * 1000 > cll_1unit` against an FHFA conforming loan limit will flag ~every loan as jumbo (`min_amt * 1000 = 1,000,000` ≫ any CLL ≈$420K–$766K). One real-world incident from this pipeline silently produced a "jumbo" panel that was 96%-correlated with the all-purchase panel. The correct comparison is `loan_amount > cll_1unit` (both in dollars).
+
+| Use case | Correct | Wrong |
+|---|---|---|
+| Jumbo flag vs FHFA CLL | `loan_amount > cll_1unit` | `loan_amount * 1000 > cll_1unit` |
+| Aggregate dollar volume | `SUM(loan_amount)` | `SUM(loan_amount) * 1000` |
+| Loan-to-income ratio | `loan_amount / (income * 1000)` | `(loan_amount * 1000) / income` |
+
+(`income` is the only `* 1000` survivor — see row above.)
 
 ---
 
@@ -526,6 +554,7 @@ into CFPB live DB after snapshot cut). Not pipeline issues.
 | `SUM(income)` to get dollars | `SUM(TRY_CAST(income AS DOUBLE)) * 1000` (income is $000s all years) |
 | `COUNT(*) = applications` for small lenders | Small lender rows are replicated ~7x in snapshot -- use CFPB API for true counts |
 | `loan_amount` in $000s for any year | ETL already scaled pre-2018 to whole dollars -- `loan_amount` is always whole dollars |
+| `loan_amount * 1000 > cll_1unit` for jumbo | Use `loan_amount > cll_1unit` -- both already in dollars; the `* 1000` flags ~every loan as jumbo (see Critical Unit Conventions) |
 | Joining avery_crosswalk on `lei` only | Must include `AND av.activity_year = l.year` (one row per lender per year) |
 | Querying `open_end_line_of_credit` for 2000-2017 | Field is NULL pre-2018; filter 2018+ only or omit |
 | Using `lien_status`, `hoepa_status`, `rate_spread` for 2000-2003 | These fields are NULL for 2000-2003 (added by 2004 HMDA reform) |

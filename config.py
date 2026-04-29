@@ -277,3 +277,182 @@ def get_permco_rssd_staging_path() -> Path:
 def get_permco_rssd_manifest_path() -> Path:
     """Path to the permco-rssd-link download manifest JSON."""
     return get_permco_rssd_storage_path() / "download_manifest.json"
+
+
+# ── SOD (FDIC Summary of Deposits) path helpers ───────────────────────────────
+
+SOD_DATASET = "sod"
+
+SOD_USER_AGENT = (
+    "SOD-Research-Pipeline/1.0 "
+    "(academic; empirical-data-construction; "
+    "https://github.com/dratnadiwakara/empirical-data-construction)"
+)
+
+
+def get_sod_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the SOD dataset folder on the HDD."""
+    path = HDD_PATH / SOD_DATASET / subdataset if subdataset else HDD_PATH / SOD_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_sod_duckdb_path() -> Path:
+    """Path to the SOD DuckDB database."""
+    return get_sod_storage_path() / "sod.duckdb"
+
+
+def get_sod_raw_path(year: int) -> Path:
+    """Raw download directory for one SOD survey year."""
+    p = get_sod_storage_path("raw") / str(year)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_sod_staging_path(year: int) -> Path:
+    """Hive-partitioned Parquet staging directory for one SOD survey year."""
+    p = get_sod_storage_path("staging") / f"year={year}"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_sod_manifest_path() -> Path:
+    """Path to the SOD download idempotency manifest JSON."""
+    return get_sod_storage_path() / "download_manifest.json"
+
+
+# ── IRS SOI (Individual Income Tax ZIP Code Data) path helpers ────────────────
+
+IRS_DATASET = "irs"
+
+IRS_USER_AGENT = (
+    "IRS-SOI-Research-Pipeline/1.0 "
+    "(academic; empirical-data-construction; "
+    "https://github.com/dratnadiwakara/empirical-data-construction)"
+)
+
+
+def get_irs_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the IRS SOI dataset folder on the HDD."""
+    path = HDD_PATH / IRS_DATASET / subdataset if subdataset else HDD_PATH / IRS_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_irs_duckdb_path() -> Path:
+    """Path to the IRS SOI DuckDB database."""
+    return get_irs_storage_path() / "irs.duckdb"
+
+
+def get_irs_raw_path(year: int) -> Path:
+    """Raw download directory for one IRS SOI tax year."""
+    p = get_irs_storage_path("raw") / str(year)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_irs_staging_path(year: int) -> Path:
+    """Hive-partitioned Parquet staging directory for one IRS SOI tax year."""
+    p = get_irs_storage_path("staging") / f"year={year}"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_irs_manifest_path() -> Path:
+    """Path to the IRS SOI download idempotency manifest JSON."""
+    return get_irs_storage_path() / "download_manifest.json"
+
+
+# ── RateWatch (S&P Global deposit rate panel) path helpers ───────────────────
+
+RATEWATCH_DATASET = "ratewatch"
+
+# Source: local S&P Global RateWatch extract (no HTTP — files come on disk).
+RATEWATCH_SOURCE_ROOT = Path(r"D:\RateWatch_PS_full")
+
+
+def get_ratewatch_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the RateWatch dataset folder on the HDD."""
+    path = HDD_PATH / RATEWATCH_DATASET / subdataset if subdataset else HDD_PATH / RATEWATCH_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_ratewatch_duckdb_path() -> Path:
+    """Path to the RateWatch DuckDB database."""
+    return get_ratewatch_storage_path() / "ratewatch.duckdb"
+
+
+def get_ratewatch_raw_path(year: int) -> Path:
+    """Raw extracted rate-data directory for one year."""
+    p = get_ratewatch_storage_path("raw") / str(year)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_ratewatch_support_path() -> Path:
+    """Directory holding shared lookup files (institution details, acct join, change history)."""
+    p = get_ratewatch_storage_path("raw") / "support"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_ratewatch_staging_path(year: int) -> Path:
+    """Hive-partitioned Parquet staging directory for one RateWatch year."""
+    p = get_ratewatch_storage_path("staging") / f"year={year}"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_ratewatch_support_staging_path() -> Path:
+    """Staging directory for support-table Parquet (institution details, acct join)."""
+    p = get_ratewatch_storage_path("staging") / "support"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_ratewatch_manifest_path() -> Path:
+    """Path to the RateWatch download/extract manifest JSON."""
+    return get_ratewatch_storage_path() / "download_manifest.json"
+
+
+# ── Y-9C (FR Y-9C Bank Holding Company quarterly filings) path helpers ───────
+
+Y9C_DATASET = "y9c"
+
+Y9C_USER_AGENT = (
+    "Y9C-Research-Pipeline/1.0 "
+    "(academic; empirical-data-construction; "
+    "https://github.com/dratnadiwakara/empirical-data-construction)"
+)
+
+
+def get_y9c_storage_path(subdataset: str = "") -> Path:
+    """Returns the path to the Y-9C dataset folder on the HDD."""
+    path = HDD_PATH / Y9C_DATASET / subdataset if subdataset else HDD_PATH / Y9C_DATASET
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_y9c_duckdb_path() -> Path:
+    """Path to the Y-9C DuckDB database."""
+    return get_y9c_storage_path() / "y9c.duckdb"
+
+
+def get_y9c_raw_path(year: int, quarter: int) -> Path:
+    """Raw extracted directory for one (year, quarter)."""
+    p = get_y9c_storage_path("raw") / f"{year}Q{quarter}"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_y9c_staging_path(year: int, quarter: int) -> Path:
+    """Hive-partitioned Parquet staging directory for one (year, quarter)."""
+    p = get_y9c_storage_path("staging") / f"year={year}" / f"quarter={quarter}"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_y9c_manifest_path() -> Path:
+    """Path to the Y-9C download/extract manifest JSON."""
+    return get_y9c_storage_path() / "download_manifest.json"

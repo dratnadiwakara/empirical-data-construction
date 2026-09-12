@@ -1,12 +1,12 @@
 """
-HMDA LAR ETL (2000-2024).
+HMDA LAR ETL (2000-2025).
 
 Uses DuckDB's out-of-core engine to read the pipe-delimited or comma-delimited LAR
 CSV and write directly to Parquet — without loading the full dataset into Python
 memory.  Safe on 8 GB machines.
 
 Era dispatch:
-  2018-2024  Post-reform: pipe-delimited, header, 99 cols, no transforms.
+  2018-2025  Post-reform: pipe-delimited, header, 99 cols, no transforms.
   2017       Pre-reform FFIEC: pipe-delimited, NO header (use COLUMNS_2017), 45 cols.
              loan_amount ×1000, census_tract FIPS construction, column renames.
   2007-2016  Pre-reform CFPB: comma-delimited, header, ~45 cols.
@@ -19,12 +19,12 @@ Era dispatch:
 
 Usage
 -----
-    python -m hmda.construct --year 2024          # process single year (start here)
+    python -m hmda.construct --year 2025          # process single year (start here)
     python -m hmda.construct --year 2016          # process 2016 (CFPB historic)
     python -m hmda.construct --year 2017          # process 2017 (FFIEC pre-reform)
     python -m hmda.construct --year 2006          # process 2006 (ICPSR)
-    python -m hmda.construct --year 2024 --force  # reprocess even if Parquet exists
-    python -m hmda.construct --all                # 2024 -> 2000 (after 2024 confirmed)
+    python -m hmda.construct --year 2025 --force  # reprocess even if Parquet exists
+    python -m hmda.construct --all                # 2025 -> 2000 (after 2025 confirmed)
 """
 from __future__ import annotations
 
@@ -147,7 +147,7 @@ def _build_select_exprs(
 def _build_select_exprs_post2018(
     csv_cols: list[str],
 ) -> tuple[str, list[str], list[str], list[str]]:
-    """SELECT expression builder for 2018-2024 (no renames, no scaling)."""
+    """SELECT expression builder for 2018-2025 (no renames, no scaling)."""
     csv_set = set(csv_cols)
     master_set = set(MASTER_SCHEMA)
 
@@ -241,7 +241,7 @@ def _build_select_exprs_2017(
     # Pre-2018 identifier columns — not in MASTER_SCHEMA but needed for analysis-time
     # joins (respondent_id + agency_code → avery_crosswalk for RSSD linkage, and
     # property_type for dwelling-category research). Append them after MASTER_SCHEMA
-    # expressions; union_by_name=true means they'll be NULL for 2018-2024 rows.
+    # expressions; union_by_name=true means they'll be NULL for 2018-2025 rows.
     pre2018_extra = ["respondent_id", "agency_code", "property_type"]
     extra_exprs: list[str] = []
     for col in pre2018_extra:
@@ -583,7 +583,7 @@ def construct_year_duckdb(
             f"all_varchar=true, ignore_errors=true"
         )
     else:
-        # 2018-2024: pipe-delimited with header
+        # 2018-2025: pipe-delimited with header
         # 2007-2016: comma-delimited with header
         read_csv_opts = f"sep='{sep}', header=true, all_varchar=true, ignore_errors=true"
 
@@ -723,12 +723,12 @@ def construct_year(year: int, force: bool = False) -> bool:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Construct HMDA LAR panel (2000-2024): raw -> Parquet -> DuckDB."
+        description="Construct HMDA LAR panel (2000-2025): raw -> Parquet -> DuckDB."
     )
     grp = p.add_mutually_exclusive_group()
-    grp.add_argument("--year", type=int, help="Process a single year (2000-2024)")
+    grp.add_argument("--year", type=int, help="Process a single year (2000-2025)")
     grp.add_argument("--all", dest="all_years", action="store_true",
-                     help="Process all years 2024 -> 2000")
+                     help="Process all years 2025 -> 2000")
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if staging Parquet already exists")
     return p.parse_args()

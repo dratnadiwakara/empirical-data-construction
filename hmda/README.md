@@ -30,7 +30,7 @@ Bypassing the VIEW silently gives era-inconsistent results.
 
 ```sql
 -- GOOD
-SELECT state_code, county_code, county_fips FROM lar_panel WHERE year = 2024;
+SELECT state_code, county_code, county_fips FROM lar_panel WHERE year = 2025;
 
 -- BAD — unharmonized, no county_fips, pre-2018 lost zero-padding
 SELECT * FROM read_parquet('C:/empirical-data-construction/hmda/staging/year=2003/data.parquet');
@@ -60,7 +60,7 @@ conn.execute(f"PRAGMA memory_limit='{DUCKDB_MEMORY_LIMIT}'")
 
 ## Coverage
 
-- **Years**: 2000-2024 (25 years)
+- **Years**: 2000-2025 (26 years)
 - **Rows**: ~536 million
 - **View**: `lar_panel` (hive-partitioned Parquet, always use `WHERE year = ...` first)
 - **All columns**: VARCHAR -- use `TRY_CAST(col AS DOUBLE)` for arithmetic
@@ -71,7 +71,7 @@ conn.execute(f"PRAGMA memory_limit='{DUCKDB_MEMORY_LIMIT}'")
 
 | Era | Years | Source | Delimiter | Header | Cols |
 |-----|-------|--------|-----------|--------|------|
-| Post-reform | 2018-2024 | FFIEC snapshot `_pipe.zip` | Pipe `\|` | Yes | 99 |
+| Post-reform | 2018-2025 | FFIEC snapshot `_pipe.zip` | Pipe `\|` | Yes | 99 |
 | Pre-reform FFIEC | 2017 | FFIEC snapshot `_txt.zip` | Pipe `\|` | **No** | 45 |
 | Pre-reform CFPB | 2007-2016 | CFPB historic portal `_labels.zip` | Comma `,` | Yes | 78 (45 kept) |
 | ICPSR pre-CFPB | 2000-2006 | OpenICPSR project 151921 (manual) | Pipe `\|` | Yes | 38 or 23 |
@@ -97,7 +97,7 @@ extract with `unzip` from Git (`C:\Program Files\Git\usr\bin\unzip.exe`) -- Pyth
 
 ### ⚠️ `loan_amount` is already in dollars — common mistake
 
-Public-source HMDA documentation says pre-2018 LAR `loan_amount` is in thousands and 2018+ is in dollars. **That distinction does not apply to this DuckDB.** The pipeline pre-converts pre-2018 values to whole dollars at ingest, so the `lar_panel` VIEW serves `loan_amount` in dollars uniformly across 2000–2024.
+Public-source HMDA documentation says pre-2018 LAR `loan_amount` is in thousands and 2018+ is in dollars. **That distinction does not apply to this DuckDB.** The pipeline pre-converts pre-2018 values to whole dollars at ingest, so the `lar_panel` VIEW serves `loan_amount` in dollars uniformly across 2000–2025.
 
 Quick sanity check (any year):
 
@@ -133,7 +133,7 @@ The Parquet files are hive-partitioned on `year`. Always include a year predicat
 -- GOOD (partition pruning)
 SELECT * FROM lar_panel WHERE year = 2023 AND action_taken = '1'
 
--- BAD (full scan of all 536M rows)
+-- BAD (full scan of all 549M rows)
 SELECT * FROM lar_panel WHERE action_taken = '1'
 ```
 
@@ -173,7 +173,7 @@ Six columns bridge categorical differences across the 2017/2018 reform boundary.
 
 ```sql
 -- Cross-year refinance query (CORRECT)
-WHERE loan_purpose_harmonized = '3'    -- all refinancings, all years 2000-2024
+WHERE loan_purpose_harmonized = '3'    -- all refinancings, all years 2000-2025
 
 -- Year-specific (only correct for one era)
 WHERE loan_purpose = '3'               -- 2000-2017 only
@@ -425,7 +425,7 @@ GROUP BY year, race_eth
 ORDER BY year, race_eth
 ```
 
-### Purchase vs refinance volume by year (harmonized -- all 25 years)
+### Purchase vs refinance volume by year (harmonized -- all 26 years)
 ```sql
 SELECT
     year,
@@ -485,7 +485,7 @@ ORDER BY originations DESC
 LIMIT 20
 ```
 
-### GSE purchase rates by loan type (2018-2024)
+### GSE purchase rates by loan type (2018-2025)
 ```sql
 SELECT
     year,
@@ -500,10 +500,11 @@ ORDER BY year, loan_type
 
 ---
 
-## Validated Row Counts (All 25 Years)
+## Validated Row Counts (All 26 Years)
 
 | Year | Rows | Source |
 |------|------|--------|
+| 2025 | 13,543,606 | FFIEC snapshot |
 | 2024 | 12,229,298 | FFIEC snapshot |
 | 2023 | 11,483,889 | FFIEC snapshot |
 | 2022 | 16,080,210 | FFIEC snapshot |
@@ -542,7 +543,7 @@ into CFPB live DB after snapshot cut). Not pipeline issues.
 3. **Sample for exploration**: `SELECT * FROM lar_panel WHERE year=2023 USING SAMPLE 10000 ROWS`
 4. **Avoid `SELECT *` on full years** -- 99+ VARCHAR columns, 10-41M rows per year
 5. **Cast once in a CTE** rather than repeating `TRY_CAST` in WHERE and SELECT
-6. **Avoid cross-year scans without year filter** -- 536M rows total
+6. **Avoid cross-year scans without year filter** -- 549M rows total
 
 ---
 

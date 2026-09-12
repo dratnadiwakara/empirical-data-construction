@@ -254,11 +254,20 @@ def _render_status() -> str:
     for key in sorted(zips_entry.keys(), key=lambda k: (int(k[:4]), int(k[5:]))):
         e = zips_entry[key]
         yr, q = e["year"], e["quarter"]
-        size_mb = e["size"] / (1024 * 1024)
+        # `size` is absent for entries written before it was recorded; fall back
+        # to the file on disk, and render "-" if the zip is gone (already
+        # extracted and cleaned up).
+        size = e.get("size")
+        if size is None:
+            try:
+                size = Path(e["path"]).stat().st_size
+            except OSError:
+                size = None
+        size_str = f"{size / (1024 * 1024):>12.1f}" if size else f"{'-':>12}"
         extracted = "yes" if e.get("extract_status") == "extracted" else "no"
         is_loaded = "yes" if (yr, q) in loaded else "no"
         lines.append(
-            f"{key:<10}{size_mb:>12.1f}{extracted:>14}{is_loaded:>10}"
+            f"{key:<10}{size_str}{extracted:>14}{is_loaded:>10}"
         )
 
     lines.append("")

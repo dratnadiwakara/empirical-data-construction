@@ -1,10 +1,10 @@
 """
 HMDA LAR download script.
 
-Downloads LAR files for years 2007-2024 (newest first) from CFPB/FFIEC sources.
+Downloads LAR files for years 2007-2025 (newest first) from CFPB/FFIEC sources.
 
 Era routing (delegated to hmda.metadata.get_source_urls):
-  2018-2024 → FFIEC snapshot pipe file
+  2018-2025 → FFIEC snapshot pipe file
   2017      → FFIEC snapshot txt file (no header)
   2007-2016 → CFPB historic data portal (comma-delimited labeled CSV)
 
@@ -18,7 +18,7 @@ Features
 
 Usage
 -----
-    python -m hmda.download --all            # 2024 -> 2007 (default)
+    python -m hmda.download --all            # 2025 -> 2007 (default)
     python -m hmda.download --year 2016      # single year
     python -m hmda.download --update         # only re-check for newer releases
     python -m hmda.download --force          # re-download even if manifest current
@@ -409,7 +409,7 @@ def download_year(
         if year <= 2006:
             return _download_nara_year(year, raw_dir, manifest, delete_raw, client)
         else:
-            # 2007-2024: standard CFPB/FFIEC download
+            # 2007-2025: standard CFPB/FFIEC download
             return _download_standard_year(year, raw_dir, manifest, delete_raw, client)
     finally:
         if own_client:
@@ -549,13 +549,13 @@ def download_all(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Download HMDA LAR files for 2007-2024."
+        description="Download HMDA LAR files for 2007-2025."
     )
     grp = p.add_mutually_exclusive_group()
     grp.add_argument("--year", type=int, help="Download a single year (e.g., 2016)")
     grp.add_argument(
         "--all", dest="all_years", action="store_true",
-        help="Download all years 2024 -> 2007 (default)"
+        help="Download all years 2025 -> 2007 (default)"
     )
     p.add_argument(
         "--update", action="store_true",
@@ -579,7 +579,7 @@ def main() -> None:
     if args.year:
         years = [args.year]
     else:
-        years = ALL_YEARS  # 2024 first → 2004
+        years = ALL_YEARS  # 2025 first → 2004
 
     logger.info("Starting HMDA LAR download for %d year(s): %s", len(years), years)
     results = download_all(years, manifest, force=args.force, delete_raw=args.delete_raw)

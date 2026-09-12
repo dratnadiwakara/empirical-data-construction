@@ -6,12 +6,18 @@ Modular ETL framework converting publicly available US regulatory financial data
 **Current datasets:**
 | Dataset | Description | Years | Scale | DuckDB |
 |---------|-------------|-------|-------|--------|
-| **HMDA** | Home Mortgage Disclosure Act loan application records | 2000–2024 | ~536M rows | `hmda/hmda.duckdb` → view `hmda` |
+| **HMDA** | Home Mortgage Disclosure Act loan application records | 2000–2025 | ~549M rows | `hmda/hmda.duckdb` → view `hmda` |
 | **CRA** | Community Reinvestment Act disclosure filings | 1996–2024 | aggregate/disclosure/transmittal | `cra/cra.duckdb` |
 | **NIC** | FFIEC National Information Center entity relationships & structural changes | Snapshots (version-based) | — | `nic/nic.duckdb` |
 | **SOD** | FDIC Summary of Deposits — branch-level deposits for all FDIC-insured institutions | 1994–present | ~2.6M rows | `sod/sod.duckdb` → view `sod` |
 | **IRS** | IRS SOI individual income tax ZIP code panel — returns, AGI, wages, dividends, business income, capital gains | 1998–2022 (gaps: 1999/2000/2003) | ~27k–40k ZIPs/year | `irs/irs.duckdb` → view `irs` |
+| **IRS Migration** | IRS SOI county-to-county migration flows — tax-filer moves with returns, exemptions, AGI (inflow + outflow perspectives; filter `direction` + `is_summary_row`) | 1991–2023 (AGI 1995+; top-10 pairs only 1991–92) | ~150k–260k rows/year | `irs-migration/irs_migration.duckdb` → view `irs_migration` |
+| **Call Reports (FFIEC)** | FFIEC CDR quarterly Call Reports — all US commercial banks, 39 schedules | 2001-Q1 → 2026-Q2 | 102 quarters, ~4.3k filers/qtr | `call-reports-FFIEC/call-reports-ffiec.duckdb` → views `call_reports_panel`, `bs_panel`, `is_panel`, `filers_panel`, `schedule_*` |
 | **Y-9C** | FR Y-9C consolidated quarterly financial filings by US Bank Holding Companies | 2000-Q1 → 2025-Q4 | ~104 quarters, ~350-1,800 filers/qtr | `y9c/y9c.duckdb` → views `y9c_raw`, `bs_panel_y9c`, `is_panel_y9c`, `y9c_panel` |
+| **Y-14H.1** | FR Y-14Q Schedule H.1 — confidential loan-level corporate loan data from stress-tested BHCs/IHCs/SLHCs | quarterly | facility-quarter; ≥$1M committed corporate loans | **external parquet** — set `Y14H1_PARQUET_PATH` in `config.py`; view `y14h1` via `y14h1.access.open_y14h1()` |
+| **Compustat** | WRDS Compustat Fundamentals Annual (`comp.funda`) — public-firm financial statements | 1979–2026 (current extract; 1979 & 2026 partial edges) | ~502k firm-years × 980 vars (after `indfmt='INDL' AND datafmt='STD' AND consol='C'` filter) | `compustat/compustat.duckdb` → view `compustat`, tables `panel_metadata`, `variable_dictionary` |
+| **EDGAR 10-K** | LLM-ready SEC 10-K full-text + sectioned markdown for in-scope BHCs (currently JPM, BofA, Wells, Citi) | 2000–2025 | filing-level; one row per (cik, accession) | `edgar/edgar.duckdb` → view `edgar_10k_filings` |
+| **EDGAR Signals** | LLM-rubric-scored bank-health signals derived from 10-K text (9 dimensions: credit/capital/liquidity/concentration/legal/operational/tone/clarity + YoY risk escalation) | depends on scored cohort | one row per (bhc_rssd, fy_year, dimension) | `edgar-signals/edgar_signals.duckdb` → views `edgar_10k_signals`, `edgar_10k_signals_wide`, `edgar_10k_health_index`. **Requires `ANTHROPIC_API_KEY`** |
 
 ## Architecture & Directory Structure
 
@@ -92,7 +98,7 @@ C:\empirical-data-construction\{hmda|cra|nic}\
 ## Dataset-Specific Notes
 
 ### HMDA
-- **4 schema eras**: 2018–2024 (CFPB), 2017 (transition), 2007–2016 (FFIEC), 2000–2006 (ICPSR pipe-delimited)
+- **4 schema eras**: 2018–2025 (CFPB), 2017 (transition), 2007–2016 (FFIEC), 2000–2006 (ICPSR pipe-delimited)
 - **Key harmonization**: pre-2018 uses ARID+agency_code as lender ID; post-2018 uses LEI → `arid_xref.py` bridges them
 - **Lender linking**: `avery.py` maps any lender ID to RSSD (Fed bank structure ID)
 - **Census tract**: constructed FIPS from state/county/tract fields across eras
@@ -114,6 +120,16 @@ C:\empirical-data-construction\{hmda|cra|nic}\
 - **Column gaps**: 1998/2001/2002 lack dividend/business/capgain columns; 2008 lacks all N-series count columns — these are NULL, not bugs
 - **Join key**: `zipcode` (VARCHAR 5-digit, LPAD-padded) — joins to SOD, HMDA, CRA on zipcode/year
 - **Units**: all `agi_*` columns in **$thousands** throughout entire series (pipeline corrects 2007/2008 IRS anomaly)
+
+### Y-14H.1 (FR Y-14Q Schedule H.1 Corporate Loan)
+- **Confidential** Federal Reserve supervisory data — does NOT live on this machine. Parquet sits on a separate secure server. The `y14h1/` folder ships schema, code lookups, query helpers, and validation only. No `download.py`, no `construct.py`, no local DuckDB.
+- **Path**: set `Y14H1_PARQUET_PATH` in `config.py` on the secure server (leave blank in committed code). `from y14h1.access import open_y14h1` returns a DuckDB connection with a `y14h1` view over the parquet.
+- **Units**: dollar fields are **whole USD**, not $thousands — different from SOD/Y-9C in this repo. `CommittedExposure = 5000000` is $5 million.
+- **Flag convention**: Fed reports yes/no as **1=No, 2=Yes** for every flag (LeveragedLoanFlag, SpecialPurposeEntityFlag, ModificationsFlag, etc.). Easy to flip — reference `YES_NO_FLAG` in `y14h1/metadata.py`.
+- **PD / LGD**: decimals to 4 places (`0.0005` = 0.05%, `1` = defaulted), not percentages. Stored as **string** in parquet because `'NA'` is a regulator-defined valid value. Same for `EAD`, `CumulativeChargeoffs`, `FairValueAdjustment`, `InterestRateSpread`, `CollateralMarketValue` — `TRY_CAST(... AS DOUBLE)` before arithmetic.
+- **Date sentinels**: `MaturityDate` / `CurrentMaturityDate` = `9999-01-01` for demand loans. `RenewalDate` / `NonAccrualDate` / `DateLastAudit` = `9999-12-31` for never-renewed / not on non-accrual / no audit. Filter out before computing remaining term or vintage.
+- **PK**: `(ID_RSSD, InternalCreditFacilityID, FileDate)`. Obligor rollup via `InternalObligorID`. Customer rollup via `CustomerID`.
+- **Confidentiality**: row-level data must NOT leave the secure environment. Aggregates only, and only with regulator-approved cell-suppression rules.
 
 ## Construction & Update Principles
 1. **Raw-to-Staging**: ZIP/CSV → compressed Parquet immediately after download

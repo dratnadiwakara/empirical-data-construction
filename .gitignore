@@ -3,3 +3,5 @@ hmda/.venv_linux/
 *.csv
 __pycache__/
 *.pyc
+# Dataset staging/temp payloads live on the HDD, never in git
+compustat/temp/

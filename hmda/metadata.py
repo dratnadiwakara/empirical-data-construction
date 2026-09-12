@@ -12,9 +12,9 @@ from typing import Final
 
 # ── Era boundaries ─────────────────────────────────────────────────────────────
 FIRST_YEAR: Final[int] = 2000
-LAST_YEAR: Final[int] = 2024
+LAST_YEAR: Final[int] = 2025
 
-ALL_YEARS: Final[list[int]] = list(range(LAST_YEAR, FIRST_YEAR - 1, -1))  # 2024 → 2000
+ALL_YEARS: Final[list[int]] = list(range(LAST_YEAR, FIRST_YEAR - 1, -1))  # 2025 → 2000
 
 # CFPB historic data portal years (comma-delimited CSV, labeled values, header row)
 CFPB_HISTORIC_FIRST_YEAR: Final[int] = 2007
@@ -74,16 +74,16 @@ NARA_API_TMPL: Final[str] = (
 def get_source_urls(year: int) -> list[str]:
     """
     Return an ordered list of candidate download URLs for a given year.
-    Supported range: 2000-2024.
+    Supported range: 2000-2025.
 
     Era routing:
-      2018-2024 → FFIEC snapshot pipe file
+      2018-2025 → FFIEC snapshot pipe file
       2017      → FFIEC snapshot txt file (different filename convention)
       2007-2016 → CFPB historic data portal (comma-delimited labeled CSV)
       2000-2006 → ICPSR OpenICPSR (manually downloaded; no auto-download URL)
     """
-    if year > 2024 or year < 2000:
-        raise ValueError(f"Year {year} outside supported range 2000-2024")
+    if year > LAST_YEAR or year < 2000:
+        raise ValueError(f"Year {year} outside supported range 2000-{LAST_YEAR}")
     if year <= 2006:
         # ICPSR files are downloaded manually; no public URL to return
         return []
@@ -96,7 +96,7 @@ def get_source_urls(year: int) -> list[str]:
 
 
 def is_pipe_delimited(year: int) -> bool:
-    """2000-2006 ICPSR and 2017-2024 FFIEC are pipe-delimited; 2007-2016 CFPB are comma."""
+    """2000-2006 ICPSR and 2017-2025 FFIEC are pipe-delimited; 2007-2016 CFPB are comma."""
     return year >= 2017 or year <= 2006
 
 

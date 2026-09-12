@@ -6,7 +6,7 @@ Primary reference for retrieving data from this dataset (humans and AI agents). 
 
 ## What this dataset is
 
-Quarterly FFIEC Call Reports (official regulator filings for every US commercial bank), 2001-Q1 through 2025-Q4, at **two query layers**:
+Quarterly FFIEC Call Reports (official regulator filings for every US commercial bank), 2001-Q1 through 2026-Q2, at **two query layers**:
 
 1. **Raw MDRM layer** — 46 schedule views, every column is one MDRM item code (e.g. `RCFD2170` = Total Assets on form 031). Use when you know the MDRM code or need fine-grained line items not in the harmonized layer.
 2. **Harmonized layer (v2)** — 4 views (`bs_panel`, `is_panel`, `filers_panel`, `call_reports_panel`) with CFLV-style variable names (`assets`, `deposits`, `ln_tot`, `ytdnetinc`) and unified RCFD/RCON resolution across forms 031/041/051. **Use this for most questions.**
@@ -424,7 +424,7 @@ Some CFLV concepts need year-branched formulas (e.g. `time_deposits` split chang
 
 Every schedule view has these columns on top of its MDRM set:
 - `IDRSSD` (VARCHAR) — filer identifier; join key everywhere.
-- `activity_year` (INTEGER) — 2001..2025.
+- `activity_year` (INTEGER) — 2001..2026.
 - `activity_quarter` (INTEGER) — 1, 2, 3, 4.
 
 **`SHOW TABLES` to list everything. `DESCRIBE {view}` to see columns.**
@@ -794,7 +794,7 @@ LIMIT 20;
 python call-reports-FFIEC\download.py --scan
 
 # build or refresh one quarter
-python call-reports-FFIEC\construct.py --quarter 2025Q4
+python call-reports-FFIEC\construct.py --quarter 2026Q2
 
 # bulk load everything in raw/
 python call-reports-FFIEC\construct.py --all --skip-views

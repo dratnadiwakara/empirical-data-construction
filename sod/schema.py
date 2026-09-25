@@ -3,6 +3,7 @@ TypedDict definitions for the FDIC SOD pipeline.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional, TypedDict
 
 
@@ -28,8 +29,9 @@ class SodRecord(TypedDict, total=False):
     BRNUM: Optional[int]       # Branch sequence number
     BRSERTYP: Optional[int]    # Branch service type code
     CHRTAGNT: Optional[str]    # Charter agent
-    ESTYMD: Optional[str]      # Establishment date (YYYY-MM-DD)
+    ESTYMD: Optional[date]     # Establishment date (DATE)
     NAMEHCR: Optional[str]     # Holding company name
+    ACQYMD: Optional[date]     # Acquisition date (DATE); NULL if never acquired
 
 
 class PanelMetadataRecord(TypedDict):

@@ -2,8 +2,8 @@
 
 Branch-level deposit data for all FDIC-insured institutions. Annual survey conducted each June 30. Covers 1994–present.
 
-**Source**: FDIC BankFind API — `https://banks.data.fdic.gov/api/sod`  
-**Scale**: ~75,000–85,000 branch records per year; ~2.6M rows total (1994–2026)  
+**Source**: FDIC BankFind API — `https://api.fdic.gov/banks/sod` (old `banks.data.fdic.gov/api/sod` host now redirects)  
+**Scale**: ~75,000–85,000 branch records per year; ~2.8M rows total (1994–2026; 2026 survey added 2026-09-25, 2025 revised in same pull)  
 **DuckDB**: `C:\empirical-data-construction\sod\sod.duckdb`  
 **View**: `sod` (hive-partitioned by year)
 
@@ -40,7 +40,9 @@ conn.execute("""
 
 ## Schema
 
-All columns stored as-fetched from the FDIC API. Numeric columns cast to BIGINT; all others VARCHAR.
+All columns stored as-fetched from the FDIC API. Numeric columns cast to BIGINT; date columns cast to DATE; all others VARCHAR.
+
+**Known date anomalies (FDIC-side, not pipeline):** ~60 rows in 2019–2022 and 2026 have `ESTYMD` later than the June 30 survey date; 1,227 branches have `ESTYMD` revised across survey years; 22 rows have `ACQYMD` earlier than `ESTYMD`. Earliest `ESTYMD` is 1782-01-01. Prior to 2026-09-25 `ESTYMD` was 100% NULL (API had renamed the field); the pre-fix build is kept at `C:\empirical-data-construction\sod_backup_20260925\`.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -63,8 +65,9 @@ All columns stored as-fetched from the FDIC API. Numeric columns cast to BIGINT;
 | `BRNUM` | BIGINT | Branch sequence number within institution. `0` = main office. |
 | `BRSERTYP` | BIGINT | Branch service type code (see below). |
 | `CHRTAGNT` | VARCHAR | Charter agent: `STATE`, `OCC`, `OTS`, `NCUA`. |
-| `ESTYMD` | VARCHAR | Branch establishment date (`YYYY-MM-DD` string). |
+| `ESTYMD` | DATE | Branch establishment date. Source API field `SIMS_ESTABLISHED_DATE` (mixed raw formats, parsed to DATE). Populated 80–94% for 1994–2010, ~100% from 2011. |
 | `NAMEHCR` | VARCHAR | Name of the top-tier holding company. |
+| `ACQYMD` | DATE | Date branch was acquired by its current institution. Source API field `SIMS_ACQUIRED_DATE`. NULL if never acquired (populated 34–57%, rising over time). Added 2026-09-25. |
 
 ### BRSERTYP codes
 | Code | Description |

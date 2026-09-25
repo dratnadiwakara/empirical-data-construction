@@ -14,7 +14,7 @@ LAST_YEAR: Final[int] = datetime.now().year
 ALL_YEARS: Final[list[int]] = list(range(LAST_YEAR, FIRST_YEAR - 1, -1))
 
 # ── API config ────────────────────────────────────────────────────────────────
-API_BASE: Final[str] = "https://banks.data.fdic.gov/api/sod"
+API_BASE: Final[str] = "https://api.fdic.gov/banks/sod"
 API_PAGE_SIZE: Final[int] = 10_000
 
 # All fields fetched from the FDIC SOD API.
@@ -40,9 +40,18 @@ API_FIELDS: Final[list[str]] = [
     "BRNUM",      # Branch sequence number within institution
     "BRSERTYP",   # Branch service type code
     "CHRTAGNT",   # Charter agent (STATE, OCC, OTS, etc.)
-    "ESTYMD",     # Branch establishment date (YYYY-MM-DD)
+    "SIMS_ESTABLISHED_DATE",  # Branch establishment date (API renamed from ESTYMD; parsed to DATE as ESTYMD)
     "NAMEHCR",    # Top-tier holding company name
+    "SIMS_ACQUIRED_DATE",     # Date branch acquired by current institution (parsed to DATE as ACQYMD)
 ]
+
+# Date columns: API field -> output column name. Raw strings arrive in mixed
+# formats ("3/4/1911 12:00:00 AM" in early years, "01/20/1910" in recent years);
+# construct.py parses both and stores DATE.
+DATE_COLS: Final[dict[str, str]] = {
+    "SIMS_ESTABLISHED_DATE": "ESTYMD",
+    "SIMS_ACQUIRED_DATE": "ACQYMD",
+}
 
 # Columns cast to BIGINT; all others stored as VARCHAR.
 NUMERIC_COLS: Final[set[str]] = {
@@ -90,6 +99,7 @@ VARIABLE_DESCRIPTIONS: Final[dict[str, str]] = {
     "BRNUM":     "Branch sequence number within the institution (0 = main office).",
     "BRSERTYP":  "Branch service type: 11=full service brick & mortar, 12=full service retail, etc.",
     "CHRTAGNT":  "Charter agent: STATE=state-chartered, OCC=nationally chartered, OTS=thrift.",
-    "ESTYMD":    "Branch establishment date (YYYY-MM-DD string).",
+    "ESTYMD":    "Branch establishment date (DATE). Source API field SIMS_ESTABLISHED_DATE.",
     "NAMEHCR":   "Name of the top-tier holding company.",
+    "ACQYMD":    "Date branch was acquired by current institution (DATE); NULL if never acquired. Source API field SIMS_ACQUIRED_DATE.",
 }

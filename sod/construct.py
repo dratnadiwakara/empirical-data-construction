@@ -26,6 +26,7 @@ from sod.metadata import (
     ALL_YEARS,
     API_BASE,
     API_FIELDS,
+    DATE_COLS,
     FIRST_YEAR,
     LAST_YEAR,
     NUMERIC_COLS,
@@ -45,7 +46,13 @@ def _build_select_sql(csv_path: Path) -> str:
     exprs = []
     for col in API_FIELDS:
         q = f'"{col}"'
-        if col in NUMERIC_COLS:
+        if col in DATE_COLS:
+            t = f"NULLIF(TRIM({q}), '')"
+            exprs.append(
+                f"CAST(COALESCE(TRY_STRPTIME({t}, '%m/%d/%Y'), "
+                f"TRY_STRPTIME({t}, '%m/%d/%Y %I:%M:%S %p')) AS DATE) AS \"{DATE_COLS[col]}\""
+            )
+        elif col in NUMERIC_COLS:
             exprs.append(
                 f"CASE WHEN TRIM({q}) = '' OR {q} IS NULL THEN NULL "
                 f"ELSE TRY_CAST(TRIM({q}) AS BIGINT) END AS {q}"
